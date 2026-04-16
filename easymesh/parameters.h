@@ -3,8 +3,9 @@
 
 // ── Topology ─────────────────────────────────────────────────
 #define DURATION        60.0    // s – total simulation time
-#define NUM_AGENT       4
-#define NUM_STA         8
+#define NUM_AGENT       2
+#define NUM_STA         1
+#define NUM_CONTROLLER	1
 
 // ── Traffic – UDP CBR (OnOff) ────────────────────────────────
 #define UL_DATA_RATE    "512Kbps"   // per STA uplink rate

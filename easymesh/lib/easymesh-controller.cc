@@ -2,6 +2,7 @@
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 #include "ns3/mobility-model.h"
+
 #include <iostream>
 #include <iomanip>
 #include <cmath>
@@ -20,17 +21,20 @@ EasyMeshController::EasyMeshController(uint32_t id, Ptr<Node> node)
 // ────────────────────────────────────────────────────────────────
 // Registry
 // ────────────────────────────────────────────────────────────────
-void EasyMeshController::RegisterAgent(Ptr<EasyMeshAgent> agent)
+void 
+EasyMeshController::RegisterAgent(Ptr<EasyMeshAgent> agent)
 {
     m_agents.push_back(agent);
 }
 
-void EasyMeshController::RegisterLink(Ptr<EasyMeshLink> link)
+void 
+EasyMeshController::RegisterLink(Ptr<EasyMeshLink> link)
 {
     m_links.push_back(link);
 }
 
-Ptr<EasyMeshAgent> EasyMeshController::GetAgent(uint32_t agentId)
+Ptr<EasyMeshAgent> 
+EasyMeshController::GetAgent(uint32_t agentId)
 {
     for (auto& a : m_agents)
         if (a->GetId() == agentId) return a;
@@ -40,7 +44,8 @@ Ptr<EasyMeshAgent> EasyMeshController::GetAgent(uint32_t agentId)
 // ────────────────────────────────────────────────────────────────
 // EstimateRssi  – log-distance model (TxPow=20dBm, exp=3)
 // ────────────────────────────────────────────────────────────────
-double EasyMeshController::EstimateRssi(Ptr<EasyMeshAgent> agent) const
+double 
+EasyMeshController::EstimateRssi(Ptr<EasyMeshAgent> agent) const
 {
     Ptr<MobilityModel> mob = agent->GetNode()->GetObject<MobilityModel>();
     if (!mob) return -80.0;
@@ -56,7 +61,8 @@ double EasyMeshController::EstimateRssi(Ptr<EasyMeshAgent> agent) const
 // ────────────────────────────────────────────────────────────────
 // SelectTargetAgent – pick least-loaded agent (excluding current)
 // ────────────────────────────────────────────────────────────────
-uint32_t EasyMeshController::SelectTargetAgent(uint32_t excludeId) const
+uint32_t 
+EasyMeshController::SelectTargetAgent(uint32_t excludeId) const
 {
     uint32_t best  = excludeId;
     double   bestL = 1e9;
@@ -71,7 +77,8 @@ uint32_t EasyMeshController::SelectTargetAgent(uint32_t excludeId) const
 // ────────────────────────────────────────────────────────────────
 // CollectApMetrics  – scheduled every 5 s
 // ────────────────────────────────────────────────────────────────
-void EasyMeshController::CollectApMetrics()
+void 
+EasyMeshController::CollectApMetrics()
 {
     double t = Simulator::Now().GetSeconds();
     NS_LOG_INFO("[Controller t=" << t << "] AP_METRICS_REPORT");
@@ -110,7 +117,8 @@ void EasyMeshController::CollectApMetrics()
 // ────────────────────────────────────────────────────────────────
 // RunSteeringEngine  – scheduled every 10 s
 // ────────────────────────────────────────────────────────────────
-void EasyMeshController::RunSteeringEngine()
+void 
+EasyMeshController::RunSteeringEngine()
 {
     double t = Simulator::Now().GetSeconds();
     NS_LOG_INFO("[Controller t=" << t << "] STEERING ENGINE TICK");
@@ -169,7 +177,8 @@ void EasyMeshController::RunSteeringEngine()
 // ────────────────────────────────────────────────────────────────
 // OptimizeBackhaulTopology  – scheduled every 20 s
 // ────────────────────────────────────────────────────────────────
-void EasyMeshController::OptimizeBackhaulTopology()
+void 
+EasyMeshController::OptimizeBackhaulTopology()
 {
     NS_LOG_INFO("[Controller t=" << Simulator::Now().GetSeconds()
                 << "] BACKHAUL TOPOLOGY OPTIMIZATION");
@@ -188,7 +197,8 @@ void EasyMeshController::OptimizeBackhaulTopology()
 // ────────────────────────────────────────────────────────────────
 // ApplyTrafficStats  – called post-simulation
 // ────────────────────────────────────────────────────────────────
-void EasyMeshController::ApplyTrafficStats(const TrafficStats& ts)
+void 
+EasyMeshController::ApplyTrafficStats(const TrafficStats& ts)
 {
     // Simple mapping: distribute aggregate UL/DL evenly across agents
     auto& flows = ts.GetFlows();
@@ -220,10 +230,11 @@ void EasyMeshController::ApplyTrafficStats(const TrafficStats& ts)
 // ────────────────────────────────────────────────────────────────
 // PrintTopology
 // ────────────────────────────────────────────────────────────────
-void EasyMeshController::PrintTopology() const
+void 
+EasyMeshController::PrintTopology() const
 {
     std::cout << "\n╔══════════════════════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║                       EasyMesh Network Topology                             ║\n";
+    std::cout << "║                       EasyMesh Network Topology                              ║\n";
     std::cout << "╚══════════════════════════════════════════════════════════════════════════════╝\n";
     std::cout << "  Controller[" << m_id << "]   Agents: " << m_agents.size()
               << "   Links: " << m_links.size() << "\n\n";
@@ -258,10 +269,11 @@ void EasyMeshController::PrintTopology() const
 // ────────────────────────────────────────────────────────────────
 // PrintSteeringLog
 // ────────────────────────────────────────────────────────────────
-void EasyMeshController::PrintSteeringLog() const
+void 
+EasyMeshController::PrintSteeringLog() const
 {
     std::cout << "\n╔══════════════════════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║                          BSS Steering Log                                   ║\n";
+    std::cout << "║                          BSS Steering Log                                    ║\n";
     std::cout << "╚══════════════════════════════════════════════════════════════════════════════╝\n";
 
     if (m_steeringLog.empty()) {
@@ -293,7 +305,8 @@ void EasyMeshController::PrintSteeringLog() const
 // ────────────────────────────────────────────────────────────────
 // PrintAgentTraffic
 // ────────────────────────────────────────────────────────────────
-void EasyMeshController::PrintAgentTraffic() const
+void 
+EasyMeshController::PrintAgentTraffic() const
 {
     std::cout << "\n╔══════════════════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║                    Per-Agent Traffic Summary                                 ║\n";
