@@ -137,12 +137,17 @@ main(int argc, char* argv[])
     wifi.SetRemoteStationManager("ns3::IdealWifiManager");
 
     /* ------------------------------------------------------------------
-     * 3. BSS1 – Backhaul: Controller(AP) ↔ Agent(STA)
-     *    Kênh trung tâm 42, 80 MHz, 5 GHz
+     * 3. Cấu hình PHY dùng chung cho cả backhaul và fronthaul
+     *    Tất cả thiết bị hoạt động trên cùng kênh trung tâm 42, 80 MHz, 5 GHz
      * ------------------------------------------------------------------ */
-    YansWifiChannelHelper chanBH = YansWifiChannelHelper::Default();
+    YansWifiChannelHelper sharedChannel = YansWifiChannelHelper::Default();
+    Ptr<YansWifiChannel>  sharedWifiChannel = sharedChannel.Create();
+
+    /* ------------------------------------------------------------------
+     * 4. BSS1 – Backhaul: Controller(AP) ↔ Agent(STA)
+     * ------------------------------------------------------------------ */
     YansWifiPhyHelper     phyBH;
-    phyBH.SetChannel(chanBH.Create());
+    phyBH.SetChannel(sharedWifiChannel);
     phyBH.Set("ChannelSettings", StringValue("{42, 80, BAND_5GHZ, 0}"));
     phyBH.Set("TxPowerStart",    DoubleValue(20.0));  // dBm
     phyBH.Set("TxPowerEnd",      DoubleValue(20.0));
@@ -163,13 +168,12 @@ main(int argc, char* argv[])
     NetDeviceContainer devAgentBH = wifi.Install(phyBH, mac, agent.Get(0));
 
     /* ------------------------------------------------------------------
-     * 4. BSS2 – Fronthaul: Agent(AP) ↔ STA
-     *    Kênh trung tâm 58, 80 MHz, 5 GHz  (không chồng lấn với BSS1)
+     * 5. BSS2 – Fronthaul: Agent(AP) ↔ STA
+     *    Dùng cùng kênh với BSS1 để controller, agent, STA cùng chia sẻ môi trường vô tuyến
      * ------------------------------------------------------------------ */
-    YansWifiChannelHelper chanFH = YansWifiChannelHelper::Default();
     YansWifiPhyHelper     phyFH;
-    phyFH.SetChannel(chanFH.Create());
-    phyFH.Set("ChannelSettings", StringValue("{58, 80, BAND_5GHZ, 0}"));
+    phyFH.SetChannel(sharedWifiChannel);
+    phyFH.Set("ChannelSettings", StringValue("{42, 80, BAND_5GHZ, 0}"));
     phyFH.Set("TxPowerStart",    DoubleValue(20.0));
     phyFH.Set("TxPowerEnd",      DoubleValue(20.0));
 
@@ -219,17 +223,29 @@ main(int argc, char* argv[])
     internet.Install(sta);
 
     Ipv4AddressHelper ipv4;
+    Ipv4StaticRoutingHelper staticRouting;
 
     ipv4.SetBase("10.1.1.0", "255.255.255.0");
     Ipv4InterfaceContainer ifCtrl   = ipv4.Assign(devCtrl);
-    /*Ipv4InterfaceContainer ifAgBH =*/ ipv4.Assign(devAgentBH);
+    Ipv4InterfaceContainer ifAgBH   = ipv4.Assign(devAgentBH);
 
     ipv4.SetBase("10.1.2.0", "255.255.255.0");
-    /*Ipv4InterfaceContainer ifAgFH =*/ ipv4.Assign(devAgentFH);
+    Ipv4InterfaceContainer ifAgFH   = ipv4.Assign(devAgentFH);
     Ipv4InterfaceContainer ifSta    = ipv4.Assign(devSta);
 
-    /* Agent tự động trở thành router IPv4 nhờ hai giao diện khác subnet */
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+    /* Agent chuyển tiếp lưu lượng giữa hai subnet trên cùng môi trường RF */
+    auto agentIpv4 = agent.Get(0)->GetObject<Ipv4>();
+    agentIpv4->SetForwarding(ifAgBH.Get(0).second, true);
+    agentIpv4->SetForwarding(ifAgFH.Get(0).second, true);
+
+    auto ctrlStatic = staticRouting.GetStaticRouting(controller.Get(0)->GetObject<Ipv4>());
+    ctrlStatic->AddNetworkRouteTo("10.1.2.0",
+                                  "255.255.255.0",
+                                  ifAgBH.GetAddress(0),
+                                  ifCtrl.Get(0).second);
+
+    auto staStatic = staticRouting.GetStaticRouting(sta.Get(0)->GetObject<Ipv4>());
+    staStatic->SetDefaultRoute(ifAgFH.GetAddress(0), ifSta.Get(0).second);
 
     /* ------------------------------------------------------------------
      * 7. Ứng dụng: UDP uplink  STA → Controller
