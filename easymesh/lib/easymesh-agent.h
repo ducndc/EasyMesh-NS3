@@ -12,6 +12,7 @@ public:
 
     void AddFronthaulLink(Ptr<EasyMeshLink> link);
     void AddBackhaulLink(Ptr<EasyMeshLink> link);
+    void RemoveFronthaulLink(Ptr<EasyMeshLink> link);
     void AddClient(uint32_t clientId);
     void RemoveClient(uint32_t clientId);
 

@@ -1,47 +1,453 @@
-// easymesh.cc  –  EasyMesh Multi-AP Simulation with Traffic Evaluation
-// ======================================================================
-// Sửa đổi: 1 controller + 2 agents (Wi‑Fi backhaul) + 1 STA
-// ======================================================================
-
 #include "easymesh.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <iomanip>
+#include <limits>
+#include <numeric>
 #include <sstream>
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("EasyMeshSim");
 
-// ── Static topology positions ────────────────────────────────────
-const Vector EasyMeshSimulation::CONTROLLER_POS   = Vector(25.0, 25.0, 0.0);
+const Vector EasyMeshSimulation::CONTROLLER_POS   = Vector(0.0, 0.0, 1.5);
 const Vector EasyMeshSimulation::AGENT_POSITIONS[NUM_AGENT] = {
-    Vector(15.0, 25.0, 0.0),   // Agent 0 – West
-    Vector(25.0, 15.0, 0.0)    // Agent 1 – North
+    Vector(20.0, 0.0, 1.5),
+    Vector(0.0, 20.0, 1.5),
+    Vector(20.0, 20.0, 1.5),
+    Vector(10.0, 10.0, 1.5)
 };
 
-// ════════════════════════════════════════════════════════════════
-// Ctor / Dtor
-// ════════════════════════════════════════════════════════════════
 EasyMeshSimulation::EasyMeshSimulation()  
 {
+    m_controllerIp = Ipv4Address::GetAny();
+    m_controllerBackhaulIp.resize(NUM_AGENT, Ipv4Address::GetAny());
     m_agentIp.resize(NUM_AGENT, Ipv4Address::GetAny()); 
+    m_agentFronthaulIp.resize(NUM_AGENT, Ipv4Address::GetAny());
     m_clientIp.resize(NUM_STA, Ipv4Address::GetAny());
+    m_clientToAgent.resize(NUM_STA, 0);
+    m_agentFronthaulDevices.resize(NUM_AGENT);
+    m_clientFronthaulDevices.resize(NUM_STA);
+    m_parentIfIndex.resize(NUM_AGENT, 0);
+    m_agentBackhaulIfIndex.resize(NUM_AGENT, 0);
+    m_agentFronthaulIfIndex.resize(NUM_AGENT, 0);
+    m_clientFronthaulIfIndex.resize(NUM_STA, 0);
+    m_agentPositions.resize(NUM_AGENT, CONTROLLER_POS);
+    m_agentParent.resize(NUM_AGENT, -1);
 }
 
 EasyMeshSimulation::~EasyMeshSimulation() {}
 
 double 
-EasyMeshSimulation::ComputeDistance(Vector a, Vector b) 
+EasyMeshSimulation::ComputeDistance(Vector a, Vector b) const
 {
     return std::sqrt(std::pow(a.x-b.x,2) +
                      std::pow(a.y-b.y,2) +
                      std::pow(a.z-b.z,2));
 }
 
-// ════════════════════════════════════════════════════════════════
-// CreateNodes
-// ════════════════════════════════════════════════════════════════
+double
+EasyMeshSimulation::EstimateLinkRssi(Vector a, Vector b) const
+{
+    double dist = ComputeDistance(a, b);
+    double pathLoss = 40.0 + 30.0 * std::log10(std::max(1.0, dist));
+    return 20.0 + 6.0 - pathLoss;
+}
+
+double
+EasyMeshSimulation::EstimateLinkThroughput(double rssi) const
+{
+    uint32_t mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
+    return (mcs + 1) * 5.5;
+}
+
+Vector
+EasyMeshSimulation::GetAgentPosition(uint32_t agentId) const
+{
+    if (agentId < m_agentNodes.GetN())
+    {
+        auto mobility = m_agentNodes.Get(agentId)->GetObject<MobilityModel>();
+        if (mobility)
+        {
+            return mobility->GetPosition();
+        }
+    }
+    return m_agentPositions.at(agentId);
+}
+
+void
+EasyMeshSimulation::GenerateRandomAgentPositions()
+{
+    auto angleVar = CreateObject<UniformRandomVariable>();
+    auto radiusVar = CreateObject<UniformRandomVariable>();
+    angleVar->SetAttribute("Min", DoubleValue(0.0));
+    angleVar->SetAttribute("Max", DoubleValue(2.0 * M_PI));
+
+    const double minRadius = std::min(8.0, TOPOLOGY_TARGET_RADIUS * 0.5);
+    const double minRadiusSquared = minRadius * minRadius;
+    const double maxRadiusSquared = TOPOLOGY_MAX_RADIUS * TOPOLOGY_MAX_RADIUS;
+    radiusVar->SetAttribute("Min", DoubleValue(0.0));
+    radiusVar->SetAttribute("Max", DoubleValue(1.0));
+
+    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    {
+        const double angle = angleVar->GetValue();
+        const double radius = std::sqrt(minRadiusSquared +
+                                        radiusVar->GetValue() *
+                                            (maxRadiusSquared - minRadiusSquared));
+
+        m_agentPositions[agentId] = Vector(
+            std::clamp(CONTROLLER_POS.x + radius * std::cos(angle),
+                       TOPOLOGY_AREA_MIN_X,
+                       TOPOLOGY_AREA_MAX_X),
+            std::clamp(CONTROLLER_POS.y + radius * std::sin(angle),
+                       TOPOLOGY_AREA_MIN_Y,
+                       TOPOLOGY_AREA_MAX_Y),
+            1.5);
+    }
+}
+
+void
+EasyMeshSimulation::OptimizeNetworkTopology()
+{
+    const auto clampCoordinate = [](double value, double lower, double upper) {
+        return std::max(lower, std::min(value, upper));
+    };
+
+    for (uint32_t iteration = 0; iteration < 15; ++iteration)
+    {
+        for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+        {
+            Vector delta = m_agentPositions[agentId] - CONTROLLER_POS;
+            double distance = ComputeDistance(m_agentPositions[agentId], CONTROLLER_POS);
+            if (distance > TOPOLOGY_MAX_RADIUS)
+            {
+                double scale = TOPOLOGY_TARGET_RADIUS / distance;
+                m_agentPositions[agentId].x = CONTROLLER_POS.x + delta.x * scale;
+                m_agentPositions[agentId].y = CONTROLLER_POS.y + delta.y * scale;
+            }
+
+            m_agentPositions[agentId].x = clampCoordinate(m_agentPositions[agentId].x,
+                                                          TOPOLOGY_AREA_MIN_X,
+                                                          TOPOLOGY_AREA_MAX_X);
+            m_agentPositions[agentId].y = clampCoordinate(m_agentPositions[agentId].y,
+                                                          TOPOLOGY_AREA_MIN_Y,
+                                                          TOPOLOGY_AREA_MAX_Y);
+        }
+
+        for (uint32_t left = 0; left < NUM_AGENT; ++left)
+        {
+            for (uint32_t right = left + 1; right < NUM_AGENT; ++right)
+            {
+                Vector diff = m_agentPositions[right] - m_agentPositions[left];
+                double distance = ComputeDistance(m_agentPositions[left], m_agentPositions[right]);
+                if (distance >= TOPOLOGY_MIN_AGENT_SEPARATION)
+                {
+                    continue;
+                }
+
+                if (distance < 1e-6)
+                {
+                    diff = Vector(1.0 + right, 0.5 + left, 0.0);
+                    distance = std::sqrt(diff.x * diff.x + diff.y * diff.y);
+                }
+
+                double push = (TOPOLOGY_MIN_AGENT_SEPARATION - distance) * 0.5;
+                Vector unit(diff.x / distance, diff.y / distance, 0.0);
+                m_agentPositions[left].x -= unit.x * push;
+                m_agentPositions[left].y -= unit.y * push;
+                m_agentPositions[right].x += unit.x * push;
+                m_agentPositions[right].y += unit.y * push;
+            }
+        }
+    }
+
+    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    {
+        NS_LOG_INFO("Optimized Agent" << agentId << " position=("
+                    << m_agentPositions[agentId].x << ","
+                    << m_agentPositions[agentId].y << ")");
+    }
+}
+
+void
+EasyMeshSimulation::BuildBackhaulTree()
+{
+    m_agentParent.assign(NUM_AGENT, -1);
+
+    std::vector<uint32_t> order(NUM_AGENT);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [this](uint32_t lhs, uint32_t rhs) {
+        return ComputeDistance(CONTROLLER_POS, m_agentPositions[lhs]) <
+               ComputeDistance(CONTROLLER_POS, m_agentPositions[rhs]);
+    });
+
+    std::vector<double> pathCapacity(NUM_AGENT, 0.0);
+    std::vector<uint32_t> connected;
+
+    for (auto agentId : order)
+    {
+        const auto directRssi = EstimateLinkRssi(CONTROLLER_POS, m_agentPositions[agentId]);
+        const auto directCapacity = EstimateLinkThroughput(directRssi);
+        const auto directDistance = ComputeDistance(CONTROLLER_POS, m_agentPositions[agentId]);
+
+        int32_t bestParent = -1;
+        double bestCapacity = directCapacity;
+        double bestScore = directCapacity - 0.5 * std::max(0.0, directDistance - TOPOLOGY_TARGET_RADIUS);
+
+        for (auto candidate : connected)
+        {
+            const auto candidateDistance = ComputeDistance(CONTROLLER_POS, m_agentPositions[candidate]);
+            if (candidateDistance >= directDistance)
+            {
+                continue;
+            }
+
+            const auto relayRssi = EstimateLinkRssi(m_agentPositions[candidate], m_agentPositions[agentId]);
+            const auto relayCapacity = EstimateLinkThroughput(relayRssi);
+            const auto endToEndCapacity = std::min(pathCapacity[candidate], relayCapacity);
+            const auto relayDistance = ComputeDistance(m_agentPositions[candidate], m_agentPositions[agentId]);
+
+            double score = endToEndCapacity - 0.25 * relayDistance;
+            if (directDistance > TOPOLOGY_TARGET_RADIUS)
+            {
+                score += 2.0;
+            }
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestParent = static_cast<int32_t>(candidate);
+                bestCapacity = endToEndCapacity;
+            }
+        }
+
+        m_agentParent[agentId] = bestParent;
+        pathCapacity[agentId] = bestCapacity;
+        connected.push_back(agentId);
+
+        if (bestParent < 0)
+        {
+            NS_LOG_INFO("Backhaul parent for Agent" << agentId << " is Controller");
+        }
+        else
+        {
+            NS_LOG_INFO("Backhaul parent for Agent" << agentId << " is Agent" << bestParent);
+        }
+    }
+}
+
+Ptr<EasyMeshLink>
+EasyMeshSimulation::FindBackhaulLinkForAgent(uint32_t agentId) const
+{
+    for (const auto& link : m_links)
+    {
+        if (link->GetType() == LinkType::BACKHAUL && link->GetDst() == m_agentNodes.Get(agentId))
+        {
+            return link;
+        }
+    }
+    return nullptr;
+}
+
+Ptr<EasyMeshLink>
+EasyMeshSimulation::FindFronthaulLinkForClient(uint32_t clientId) const
+{
+    for (const auto& link : m_links)
+    {
+        if (link->GetType() == LinkType::FRONTHAUL && link->GetDst() == m_clientNodes.Get(clientId))
+        {
+            return link;
+        }
+    }
+    return nullptr;
+}
+
+uint32_t
+EasyMeshSimulation::FindAgentForFronthaulBssid(Mac48Address bssid) const
+{
+    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    {
+        auto wifiDevice = DynamicCast<WifiNetDevice>(m_agentFronthaulDevices[agentId]);
+        if (wifiDevice && wifiDevice->GetMac()->GetAddress() == bssid)
+        {
+            return agentId;
+        }
+    }
+
+    return NUM_AGENT;
+}
+
+void
+EasyMeshSimulation::UpdateClientAssociation(uint32_t clientId, uint32_t agentId)
+{
+    NS_ABORT_MSG_IF(agentId >= NUM_AGENT, "Invalid fronthaul agent selected for client");
+
+    const uint32_t previousAgent = m_clientToAgent[clientId];
+    if (previousAgent != agentId && previousAgent < m_agents.size())
+    {
+        m_agents[previousAgent]->RemoveClient(clientId);
+    }
+
+    if (agentId < m_agents.size())
+    {
+        m_agents[agentId]->AddClient(clientId);
+    }
+
+    auto fronthaulLink = FindFronthaulLinkForClient(clientId);
+    if (fronthaulLink)
+    {
+        if (previousAgent != agentId && previousAgent < m_agents.size())
+        {
+            m_agents[previousAgent]->RemoveFronthaulLink(fronthaulLink);
+        }
+        if (agentId < m_agents.size())
+        {
+            m_agents[agentId]->AddFronthaulLink(fronthaulLink);
+        }
+
+        fronthaulLink->SetEndpoints(m_agentNodes.Get(agentId), m_clientNodes.Get(clientId));
+
+        const auto clientPosition = m_clientNodes.Get(clientId)->GetObject<MobilityModel>()->GetPosition();
+        const auto agentPosition = GetAgentPosition(agentId);
+        const auto rssi = EstimateLinkRssi(agentPosition, clientPosition);
+        const auto snr = rssi - (-95.0);
+        const auto mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
+        const auto throughput = EstimateLinkThroughput(rssi);
+        fronthaulLink->UpdateMetrics(rssi, snr, mcs, throughput, 0.0);
+    }
+
+    m_clientToAgent[clientId] = agentId;
+}
+
+void
+EasyMeshSimulation::RebuildClientRoutes()
+{
+    Ipv4StaticRoutingHelper staticRoutingHelper;
+    const auto isClientHostRoute = [this](const Ipv4RoutingTableEntry& route) {
+        return route.IsHost() &&
+               std::find(m_clientIp.begin(), m_clientIp.end(), route.GetDest()) != m_clientIp.end();
+    };
+
+    auto clearRoutes = [&](Ptr<Node> node, bool clearDefault) {
+        auto routing = staticRoutingHelper.GetStaticRouting(node->GetObject<Ipv4>());
+        for (int32_t index = static_cast<int32_t>(routing->GetNRoutes()) - 1; index >= 0; --index)
+        {
+            const auto route = routing->GetRoute(static_cast<uint32_t>(index));
+            if ((clearDefault && route.IsDefault()) || isClientHostRoute(route))
+            {
+                routing->RemoveRoute(static_cast<uint32_t>(index));
+            }
+        }
+        return routing;
+    };
+
+    auto controllerRouting = clearRoutes(m_controllerNode.Get(0), false);
+    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    {
+        clearRoutes(m_agentNodes.Get(agentId), false);
+    }
+
+    for (uint32_t clientId = 0; clientId < m_numClients; ++clientId)
+    {
+        auto clientRouting = clearRoutes(m_clientNodes.Get(clientId), true);
+        const uint32_t agentId = m_clientToAgent[clientId];
+        if (agentId >= NUM_AGENT || m_clientIp[clientId] == Ipv4Address::GetAny())
+        {
+            continue;
+        }
+
+        clientRouting->SetDefaultRoute(m_agentFronthaulIp[agentId], m_clientFronthaulIfIndex[clientId]);
+
+        uint32_t current = agentId;
+        while (m_agentParent[current] >= 0)
+        {
+            const uint32_t parent = static_cast<uint32_t>(m_agentParent[current]);
+            auto parentRouting = staticRoutingHelper.GetStaticRouting(
+                m_agentNodes.Get(parent)->GetObject<Ipv4>());
+            parentRouting->AddHostRouteTo(m_clientIp[clientId],
+                                          m_agentIp[current],
+                                          m_agentBackhaulIfIndex[parent]);
+            current = parent;
+        }
+
+        controllerRouting->AddHostRouteTo(m_clientIp[clientId],
+                                          m_agentIp[current],
+                                          m_parentIfIndex[current]);
+    }
+}
+
+void
+EasyMeshSimulation::SyncClientAssociations()
+{
+    bool updated = false;
+
+    for (uint32_t clientId = 0; clientId < m_numClients; ++clientId)
+    {
+        auto wifiDevice = DynamicCast<WifiNetDevice>(m_clientFronthaulDevices[clientId]);
+        auto staMac = wifiDevice ? DynamicCast<StaWifiMac>(wifiDevice->GetMac()) : nullptr;
+        if (!staMac || !staMac->IsAssociated())
+        {
+            NS_LOG_WARN("STA" << clientId << " is not associated yet; keeping provisional agent A"
+                        << m_clientToAgent[clientId]);
+            continue;
+        }
+
+        const uint32_t selectedAgent = FindAgentForFronthaulBssid(staMac->GetBssid(0));
+        if (selectedAgent >= NUM_AGENT)
+        {
+            NS_LOG_WARN("STA" << clientId << " associated to unknown BSSID " << staMac->GetBssid(0));
+            continue;
+        }
+
+        if (selectedAgent != m_clientToAgent[clientId])
+        {
+            NS_LOG_INFO("STA" << clientId << " selected BSS Agent" << selectedAgent
+                        << " instead of provisional Agent" << m_clientToAgent[clientId]);
+        }
+
+        UpdateClientAssociation(clientId, selectedAgent);
+        updated = true;
+    }
+
+    if (updated)
+    {
+        RebuildClientRoutes();
+    }
+}
+
+uint32_t
+EasyMeshSimulation::SelectBestUplinkAgent(uint32_t clientId) const
+{
+    Ptr<MobilityModel> clientMobility = m_clientNodes.Get(clientId)->GetObject<MobilityModel>();
+    Vector clientPosition = clientMobility->GetPosition();
+
+    uint32_t bestAgent = 0;
+    double bestScore = -std::numeric_limits<double>::infinity();
+
+    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    {
+        const auto fronthaulRssi = EstimateLinkRssi(clientPosition, GetAgentPosition(agentId));
+        const auto fronthaulThroughput = EstimateLinkThroughput(fronthaulRssi);
+
+        auto backhaulLink = FindBackhaulLinkForAgent(agentId);
+        double backhaulThroughput = backhaulLink ? backhaulLink->GetThroughput() : 0.0;
+        double backhaulRssi = backhaulLink ? backhaulLink->GetRssi() : -100.0;
+
+        const double pathCapacity = std::min(fronthaulThroughput, backhaulThroughput);
+        const double score = pathCapacity * 10.0 + fronthaulRssi + 0.5 * backhaulRssi;
+
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bestAgent = agentId;
+        }
+    }
+
+    return bestAgent;
+}
+
 void 
 EasyMeshSimulation::CreateNodes()
 {
@@ -51,9 +457,6 @@ EasyMeshSimulation::CreateNodes()
     NS_LOG_INFO("Nodes: " << NUM_CONTROLLER << " controller + "<< NUM_AGENT << " agents + " << m_numClients << " clients");
 }
 
-// ════════════════════════════════════════════════════════════════
-// InstallMobility
-// ════════════════════════════════════════════════════════════════
 void 
 EasyMeshSimulation::InstallMobility()
 {
@@ -66,141 +469,173 @@ EasyMeshSimulation::InstallMobility()
     mob.SetPositionAllocator(ca);
     mob.Install(m_controllerNode);
 
-    // Agents – fixed
+    GenerateRandomAgentPositions();
+    OptimizeNetworkTopology();
+
+    // Agents – optimized after random placement
     Ptr<ListPositionAllocator> aa = CreateObject<ListPositionAllocator>();
     for (int i = 0; i < NUM_AGENT; i++) 
-        aa->Add(AGENT_POSITIONS[i]);
+        aa->Add(m_agentPositions[i]);
     mob.SetPositionAllocator(aa);
     mob.Install(m_agentNodes);
 
-    // Clients – random walk inside 50×50 m area (chỉ 1 client nên di chuyển)
-    // mob.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
-    //     "Bounds",    RectangleValue(Rectangle(0.0, 50.0, 0.0, 50.0)),
-    //     "Speed",     StringValue("ns3::UniformRandomVariable[Min=1.0|Max=3.0]"),
-    //     "Distance",  DoubleValue(5.0));
+    auto clientX = CreateObject<UniformRandomVariable>();
+    auto clientY = CreateObject<UniformRandomVariable>();
+    clientX->SetAttribute("Min", DoubleValue(TOPOLOGY_AREA_MIN_X));
+    clientX->SetAttribute("Max", DoubleValue(TOPOLOGY_AREA_MAX_X));
+    clientY->SetAttribute("Min", DoubleValue(TOPOLOGY_AREA_MIN_Y));
+    clientY->SetAttribute("Max", DoubleValue(TOPOLOGY_AREA_MAX_Y));
 
-    // Ptr<RandomBoxPositionAllocator> cla = CreateObject<RandomBoxPositionAllocator>();
-    // cla->SetAttribute("X", StringValue("ns3::UniformRandomVariable[Min=5.0|Max=45.0]"));
-    // cla->SetAttribute("Y", StringValue("ns3::UniformRandomVariable[Min=5.0|Max=45.0]"));
-    // cla->SetAttribute("Z", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
-        Ptr<ListPositionAllocator> cla = CreateObject<ListPositionAllocator>();
-    cla->Add(Vector(25.0, 15.0, 0.0)); // cùng vị trí Agent1
+    Ptr<ListPositionAllocator> cla = CreateObject<ListPositionAllocator>();
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        Vector clientPosition(clientX->GetValue(), clientY->GetValue(), 1.0);
+        cla->Add(clientPosition);
+        NS_LOG_INFO("Randomized STA" << c << " position=("
+                    << clientPosition.x << ","
+                    << clientPosition.y << ")");
+    }
     MobilityHelper mobClient;
     mobClient.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     mobClient.SetPositionAllocator(cla);
     mobClient.Install(m_clientNodes);
-    
-    // mob.SetPositionAllocator(cla);
-    // mob.Install(m_clientNodes);
 }
 
-// ════════════════════════════════════════════════════════════════
-// CreateWifiChannels
-// ════════════════════════════════════════════════════════════════
 void 
 EasyMeshSimulation::CreateWifiChannels()
 {
     m_channelHelper = YansWifiChannelHelper::Default();
-    m_channelHelper.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-    m_channelHelper.AddPropagationLoss(
-        "ns3::LogDistancePropagationLossModel",
-        "Exponent",          DoubleValue(3.0),
-        "ReferenceDistance", DoubleValue(1.0),
-        "ReferenceLoss",     DoubleValue(40.0));
+    m_sharedWifiChannel = m_channelHelper.Create();
 }
 
-// ════════════════════════════════════════════════════════════════
-// CreateBackhaulLinks   Controller ↔ Agent i  (802.11ac 5GHz)
-// ════════════════════════════════════════════════════════════════
 void 
 EasyMeshSimulation::CreateBackhaulLinks()
 {
-    m_wifiHelper.SetStandard(WIFI_STANDARD_80211ac);
-    m_wifiHelper.SetRemoteStationManager("ns3::MinstrelHtWifiManager");
+    m_wifiHelper.SetStandard(WIFI_STANDARD_80211ax);
+    m_wifiHelper.SetRemoteStationManager("ns3::IdealWifiManager");
 
     m_phyHelper = YansWifiPhyHelper();
-    m_phyHelper.SetChannel(m_channelHelper.Create());
+    m_phyHelper.SetChannel(m_sharedWifiChannel);
+    m_phyHelper.Set("ChannelSettings", StringValue(WIFI_CHANNEL_SETTINGS));
     m_phyHelper.Set("TxPowerStart", DoubleValue(20.0));
     m_phyHelper.Set("TxPowerEnd",   DoubleValue(20.0));
 
-    m_macHelper.SetType("ns3::AdhocWifiMac");
+    Time beaconInterval = MicroSeconds(WIFI_BEACON_INTERVAL_US);
 
-    for (uint32_t i = 0; i < NUM_AGENT; i++) 
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
     {
-        NodeContainer pair;
-        pair.Add(m_controllerNode.Get(0));
-        pair.Add(m_agentNodes.Get(i));
-        NetDeviceContainer devs = m_wifiHelper.Install(m_phyHelper, m_macHelper, pair);
-        m_backhaulDevices.Add(devs);
+        Ptr<Node> parentNode = (m_agentParent[a] < 0) ? m_controllerNode.Get(0)
+                                                      : m_agentNodes.Get(m_agentParent[a]);
+        Vector parentPosition = (m_agentParent[a] < 0) ? CONTROLLER_POS
+                                                       : GetAgentPosition(m_agentParent[a]);
 
-        double dist = ComputeDistance(CONTROLLER_POS, AGENT_POSITIONS[i]);
+        std::ostringstream ssidName;
+        ssidName << "EasyMesh-Backhaul-" << a;
+        Ssid ssid = Ssid(ssidName.str());
+
+        m_macHelper.SetType("ns3::ApWifiMac",
+                            "Ssid", SsidValue(ssid),
+                            "BeaconInterval", TimeValue(beaconInterval));
+        NetDeviceContainer parentDev = m_wifiHelper.Install(m_phyHelper, m_macHelper, parentNode);
+
+        m_macHelper.SetType("ns3::StaWifiMac",
+                            "Ssid", SsidValue(ssid),
+                            "ActiveProbing", BooleanValue(false));
+        NetDeviceContainer agentDev = m_wifiHelper.Install(m_phyHelper, m_macHelper, m_agentNodes.Get(a));
+
+        m_backhaulDevices.Add(parentDev);
+        m_backhaulDevices.Add(agentDev);
+
+        double dist = ComputeDistance(parentPosition, GetAgentPosition(a));
         double pl   = 40.0 + 30.0 * std::log10(std::max(1.0, dist));
         double rssi = 20.0 + 6.0 - pl;
         double snr  = rssi - (-95.0);
         uint32_t mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
         double tput  = (mcs + 1) * 5.5;
 
-        Ptr<EasyMeshLink> link = Create<EasyMeshLink>(
-            i, m_controllerNode.Get(0), m_agentNodes.Get(i),
-            LinkType::BACKHAUL, 5.0);
+        Ptr<EasyMeshLink> link = Create<EasyMeshLink>(a,
+                                                      parentNode,
+                                                      m_agentNodes.Get(a),
+                                                      LinkType::BACKHAUL,
+                                                      5.0);
         link->UpdateMetrics(rssi, snr, mcs, tput, 0.0);
         m_links.push_back(link);
 
-        NS_LOG_INFO("BH Wi-Fi: Controller <-> Agent" << i
-            << "  dist=" << dist << "m  RSSI=" << rssi
-            << "dBm  MCS=" << mcs << "  Tput=" << tput << "Mbps");
+        std::ostringstream parentName;
+        if (m_agentParent[a] < 0)
+        {
+            parentName << "Controller(AP)";
+        }
+        else
+        {
+            parentName << "Agent" << m_agentParent[a] << "(AP)";
+        }
+
+        NS_LOG_INFO("BH Wi-Fi: " << parentName.str() << " <-> Agent" << a << "(STA)"
+                    << "  dist=" << dist << "m  RSSI=" << rssi
+                    << "dBm  MCS=" << mcs << "  Tput=" << tput << "Mbps");
     }
 }
 
-// ════════════════════════════════════════════════════════════════
-// CreateFronthaulLinks   Agent i ↔ Clients  (802.11n 2.4GHz)
-// ════════════════════════════════════════════════════════════════
 void 
 EasyMeshSimulation::CreateFronthaulLinks()
 {
     WifiHelper fh;
-    fh.SetStandard(WIFI_STANDARD_80211n);
-    fh.SetRemoteStationManager("ns3::MinstrelHtWifiManager");
+    fh.SetStandard(WIFI_STANDARD_80211ax);
+    fh.SetRemoteStationManager("ns3::IdealWifiManager");
     NS_LOG_INFO("=== CreateFronthaulLinks ===");
 
-    for (uint32_t a = 0; a < NUM_AGENT; a++) 
+    YansWifiPhyHelper fhPhy;
+    fhPhy.SetChannel(m_sharedWifiChannel);
+    fhPhy.Set("ChannelSettings", StringValue(WIFI_CHANNEL_SETTINGS));
+    fhPhy.Set("TxPowerStart", DoubleValue(20.0));
+    fhPhy.Set("TxPowerEnd",   DoubleValue(20.0));
+
+    WifiMacHelper fhMac;
+    Time beaconInterval = MicroSeconds(WIFI_BEACON_INTERVAL_US);
+    uint32_t linkId = NUM_AGENT;
+    const Ssid fronthaulSsid("EasyMesh-Fronthaul");
+
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
     {
-        YansWifiPhyHelper fhPhy;
-        fhPhy.SetChannel(m_channelHelper.Create());
-        fhPhy.Set("TxPowerStart", DoubleValue(17.0));
-        fhPhy.Set("TxPowerEnd",   DoubleValue(17.0));
-
-        WifiMacHelper fhMac;
-        Ssid ssid = Ssid("EasyMesh-AP");
-
-        // Install AP
-        fhMac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
+        fhMac.SetType("ns3::ApWifiMac",
+                      "Ssid", SsidValue(fronthaulSsid),
+                      "BeaconInterval", TimeValue(beaconInterval));
         NetDeviceContainer apDev = fh.Install(fhPhy, fhMac, m_agentNodes.Get(a));
         m_fronthaulDevices.Add(apDev);
+        m_agentFronthaulDevices[a] = apDev.Get(0);
+    }
 
-        // Install STAs for this agent (round-robin partition)
+    if (m_numClients > 0)
+    {
         fhMac.SetType("ns3::StaWifiMac",
-            "Ssid",          SsidValue(ssid),
-            "ActiveProbing", BooleanValue(false));
+                      "Ssid", SsidValue(fronthaulSsid),
+                      "ActiveProbing", BooleanValue(true));
+        NetDeviceContainer staDevices = fh.Install(fhPhy, fhMac, m_clientNodes);
+        m_fronthaulDevices.Add(staDevices);
 
-        uint32_t base = (m_numClients * a)     / NUM_AGENT;
-        uint32_t top  = (m_numClients * (a+1)) / NUM_AGENT;
-
-        NodeContainer staNd;
-        for (uint32_t c = base; c < top; c++) 
-            staNd.Add(m_clientNodes.Get(c));
-
-        if (staNd.GetN() > 0) 
+        for (uint32_t c = 0; c < m_numClients; ++c)
         {
-            NetDeviceContainer staDev = fh.Install(fhPhy, fhMac, staNd);
-            m_fronthaulDevices.Add(staDev);
+            m_clientFronthaulDevices[c] = staDevices.Get(c);
+            const uint32_t provisionalAgent = m_clientToAgent[c];
+            const auto rssi = EstimateLinkRssi(
+                GetAgentPosition(provisionalAgent),
+                m_clientNodes.Get(c)->GetObject<MobilityModel>()->GetPosition());
+            const auto snr = rssi - (-95.0);
+            const auto mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
+            const auto throughput = EstimateLinkThroughput(rssi);
+
+            Ptr<EasyMeshLink> link = Create<EasyMeshLink>(linkId++,
+                                                          m_agentNodes.Get(provisionalAgent),
+                                                          m_clientNodes.Get(c),
+                                                          LinkType::FRONTHAUL,
+                                                          5.0);
+            link->UpdateMetrics(rssi, snr, mcs, throughput, 0.0);
+            m_links.push_back(link);
         }
     }
 }
 
-// ════════════════════════════════════════════════════════════════
-// BuildTopology
-// ════════════════════════════════════════════════════════════════
 void 
 EasyMeshSimulation::BuildTopology()
 {
@@ -208,237 +643,196 @@ EasyMeshSimulation::BuildTopology()
     CreateNodes();
     InstallMobility();
     CreateWifiChannels();
+    BuildBackhaulTree();
     // Không dùng Ethernet backhaul nữa
     CreateBackhaulLinks();      // Controller ↔ Agent qua Wi-Fi
-    CreateFronthaulLinks();
 
     // Logical EasyMesh objects
     m_controller = Create<EasyMeshController>(0, m_controllerNode.Get(0));
 
-    AgentRole roles[NUM_AGENT] = { AgentRole::HYBRID, AgentRole::HYBRID };
-    for (uint32_t i = 0; i < NUM_AGENT; i++) 
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
     {
-        auto agent = Create<EasyMeshAgent>(
-            i, m_agentNodes.Get(i), roles[i], AGENT_POSITIONS[i]);
+        auto agent = Create<EasyMeshAgent>(a,
+                                           m_agentNodes.Get(a),
+                                           AgentRole::HYBRID,
+                                           GetAgentPosition(a));
         m_agents.push_back(agent);
         m_controller->RegisterAgent(agent);
     }
 
-    for (auto& l : m_links) 
-        m_controller->RegisterLink(l);
-
     AssignClientsToAgents();
+    CreateFronthaulLinks();
+
+    for (auto& l : m_links)
+    {
+        m_controller->RegisterLink(l);
+        if (l->GetType() == LinkType::BACKHAUL)
+        {
+            for (auto& agent : m_agents)
+            {
+                if (l->GetDst() == agent->GetNode())
+                {
+                    agent->AddBackhaulLink(l);
+                    break;
+                }
+            }
+        }
+        else if (l->GetType() == LinkType::FRONTHAUL)
+        {
+            for (auto& agent : m_agents)
+            {
+                if (l->GetSrc() == agent->GetNode())
+                {
+                    agent->AddFronthaulLink(l);
+                    break;
+                }
+            }
+        }
+    }
     NS_LOG_INFO("=== Topology ready ===");
 }
 
-// ════════════════════════════════════════════════════════════════
-// AssignClientsToAgents  (nearest-agent heuristic)
-// ════════════════════════════════════════════════════════════════
 void 
 EasyMeshSimulation::AssignClientsToAgents()
 {
-    for (uint32_t c = 0; c < m_numClients; c++) 
+    for (uint32_t c = 0; c < m_numClients; c++)
     {
-        Ptr<MobilityModel> mob = m_clientNodes.Get(c)->GetObject<MobilityModel>();
-        double minDist  = 1e9;
-        uint32_t best   = 0;
-        for (uint32_t a = 0; a < NUM_AGENT; a++) 
-        {
-            double d = mob ? ComputeDistance(mob->GetPosition(), AGENT_POSITIONS[a])
-                           : (double)(c % NUM_AGENT == a ? 0 : 1e9);
-            if (d < minDist) 
-            { 
-                minDist = d; 
-                best = a; 
-            }
-        }
-        m_agents[best]->AddClient(c);
+        const auto clientPosition = m_clientNodes.Get(c)->GetObject<MobilityModel>()->GetPosition();
+        const uint32_t bestAgent = SelectBestUplinkAgent(c);
+        m_clientToAgent[c] = bestAgent;
+        const auto agentPosition = GetAgentPosition(bestAgent);
+
+        NS_LOG_INFO("Best uplink for STA" << c
+                    << " at (" << clientPosition.x << "," << clientPosition.y << ")"
+                    << " is Agent" << bestAgent
+                    << " at (" << agentPosition.x << "," << agentPosition.y << ")");
     }
 }
 
-// ════════════════════════════════════════════════════════════════
-// InstallProtocolStack
-// ════════════════════════════════════════════════════════════════
-void EasyMeshSimulation::InstallProtocolStack()
+void 
+EasyMeshSimulation::InstallProtocolStack()
 {
-    NS_LOG_INFO("=== Install Protocol Stack (Wi‑Fi Backhaul + Static Routes) ===");
-    
+    NS_LOG_INFO("=== Install Protocol Stack (shared-channel EasyMesh) ===");
+
     InternetStackHelper inet;
     inet.Install(m_controllerNode);
     inet.Install(m_agentNodes);
     inet.Install(m_clientNodes);
 
     Ipv4AddressHelper addr;
-    
-    // Mảng lưu địa chỉ IP của controller trên mỗi backhaul link
-    Ipv4Address ctrlBackhaulIp[NUM_AGENT];
-    
-    // 1. Gán IP cho Wi-Fi backhaul: Controller <-> Agent i (mỗi link một subnet)
-    for (uint32_t i = 0; i < NUM_AGENT; i++) 
-    {
-        std::string subnet = "10.1." + std::to_string(i) + ".0";
-        addr.SetBase(subnet.c_str(), "255.255.255.0");
-        NetDeviceContainer linkDevs;
-        linkDevs.Add(m_backhaulDevices.Get(2*i));     // device trên Controller
-        linkDevs.Add(m_backhaulDevices.Get(2*i+1));   // device trên Agent i
-        Ipv4InterfaceContainer bhIfaces = addr.Assign(linkDevs);
-        
-        ctrlBackhaulIp[i] = bhIfaces.GetAddress(0);   // IP của controller trên link này
-        m_agentIp[i] = bhIfaces.GetAddress(1);        // IP của agent i
-        if (i == 0) m_controllerIp = ctrlBackhaulIp[0];
-        
-        NS_LOG_INFO("Backhaul link " << i << ": Controller " << ctrlBackhaulIp[i]
-                    << " <-> Agent" << i << " " << m_agentIp[i]);
-    }
-    
-    // 2. Gán IP cho Fronthaul Wi-Fi: mỗi agent tạo một BSS riêng (subnet 192.168.x.0/24)
-    for (uint32_t a = 0; a < NUM_AGENT; a++) 
-    {
-        std::string subnet = "192.168." + std::to_string(a) + ".0";
-        addr.SetBase(subnet.c_str(), "255.255.255.0");
-        
-        // Tìm AP device của agent a
-        NetDeviceContainer apDev;
-        for (uint32_t i = 0; i < m_fronthaulDevices.GetN(); i++) 
-        {
-            Ptr<WifiNetDevice> wifiDev = m_fronthaulDevices.Get(i)->GetObject<WifiNetDevice>();
-            if (wifiDev && wifiDev->GetNode() == m_agentNodes.Get(a) &&
-                wifiDev->GetMac()->GetTypeOfStation() == AP) 
-            {
-                apDev.Add(m_fronthaulDevices.Get(i));
-                break;
-            }
-        }
-        
-        // Tìm các STA devices thuộc về agent a
-        NetDeviceContainer staDevs;
-        uint32_t base = (m_numClients * a) / NUM_AGENT;
-        uint32_t top  = (m_numClients * (a+1)) / NUM_AGENT;
-        for (uint32_t c = base; c < top; c++) 
-        {
-            for (uint32_t i = 0; i < m_fronthaulDevices.GetN(); i++) 
-            {
-                if (m_fronthaulDevices.Get(i)->GetNode() == m_clientNodes.Get(c)) 
-                {
-                    staDevs.Add(m_fronthaulDevices.Get(i));
-                    break;
-                }
-            }
-        }
-        
-        // Gán IP cho AP và các STA
-        Ipv4InterfaceContainer fhIfaces;
-        if (apDev.GetN() > 0) 
-            fhIfaces = addr.Assign(apDev);
-        if (staDevs.GetN() > 0) 
-            fhIfaces.Add(addr.Assign(staDevs));
-        
-        // Lưu IP cho client (index 0 là AP, index 1.. là STA)
-        for (uint32_t idx = 1; idx < fhIfaces.GetN(); idx++) 
-        {
-            m_clientIp[base + idx - 1] = fhIfaces.GetAddress(idx);
-            NS_LOG_INFO("Fronthaul: Agent" << a << " AP=" << fhIfaces.GetAddress(0)
-                        << " STA" << (base+idx-1) << "=" << fhIfaces.GetAddress(idx));
-        }
-    }
-    
-    // 3. Enable IP forwarding
-    m_controllerNode.Get(0)->GetObject<Ipv4>()->SetAttribute("IpForward", BooleanValue(true));
-    for (uint32_t i = 0; i < NUM_AGENT; i++) 
-        m_agentNodes.Get(i)->GetObject<Ipv4>()->SetAttribute("IpForward", BooleanValue(true));
-    
-    // 4. Static routes
     Ipv4StaticRoutingHelper staticRoutingHelper;
-    
-    // Trên Controller: route đến các subnet fronthaul của từng agent (192.168.x.0/24)
-    Ptr<Ipv4StaticRouting> ctrlRouting = staticRoutingHelper.GetStaticRouting(
-        m_controllerNode.Get(0)->GetObject<Ipv4>());
-    for (uint32_t a = 0; a < NUM_AGENT; a++) 
+
+    std::vector<Ipv4Address> parentBhIp(NUM_AGENT, Ipv4Address::GetAny());
+    std::vector<std::vector<uint32_t>> children(NUM_AGENT);
+
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
     {
-        ctrlRouting->AddNetworkRouteTo(
-            Ipv4Address(("192.168." + std::to_string(a) + ".0").c_str()),
-            Ipv4Mask("255.255.255.0"),
-            m_agentIp[a],      // next hop là IP của agent a trên backhaul link
-            1 + a);            // interface index (backhaul interfaces bắt đầu từ 1)
-    }
-    
-    // Trên mỗi agent: route đến các subnet của agent khác và đến controller (nếu cần)
-    for (uint32_t a = 0; a < NUM_AGENT; a++) 
-    {
-        Ptr<Ipv4StaticRouting> agentRouting = staticRoutingHelper.GetStaticRouting(
-            m_agentNodes.Get(a)->GetObject<Ipv4>());
-        
-        // Route đến controller (có thể không cần vì đã cùng mạng backhaul, nhưng để chắc chắn)
-        // Route đến các backhaul subnet khác và các fronthaul subnet khác
-        for (uint32_t b = 0; b < NUM_AGENT; b++) 
+        if (m_agentParent[a] >= 0)
         {
-            if (b == a) continue;
-            // Backhaul subnet của agent b
-            std::string bhSubnet = "10.1." + std::to_string(b) + ".0";
-            agentRouting->AddNetworkRouteTo(
-                Ipv4Address(bhSubnet.c_str()), Ipv4Mask("255.255.255.0"),
-                ctrlBackhaulIp[a], 1); // gateway là IP của controller trên link của agent a
-            // Fronthaul subnet của agent b
-            std::string fhSubnet = "192.168." + std::to_string(b) + ".0";
-            agentRouting->AddNetworkRouteTo(
-                Ipv4Address(fhSubnet.c_str()), Ipv4Mask("255.255.255.0"),
-                ctrlBackhaulIp[a], 1);
+            children[m_agentParent[a]].push_back(a);
         }
     }
-    
-    // 5. Default route cho các STA (client)
-    for (uint32_t c = 0; c < m_numClients; c++) {
-        Ptr<Ipv4StaticRouting> clientRouting = staticRoutingHelper.GetStaticRouting(
-            m_clientNodes.Get(c)->GetObject<Ipv4>());
-        // Tìm agent quản lý client này
-        uint32_t agentIdx = 0;
-        for (uint32_t a = 0; a < NUM_AGENT; a++) {
-            uint32_t base = (m_numClients * a) / NUM_AGENT;
-            uint32_t top  = (m_numClients * (a+1)) / NUM_AGENT;
-            if (c >= base && c < top) {
-                agentIdx = a;
-                break;
-            }
+
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    {
+        NetDeviceContainer backhaulPair;
+        backhaulPair.Add(m_backhaulDevices.Get(2 * a));
+        backhaulPair.Add(m_backhaulDevices.Get(2 * a + 1));
+
+        std::ostringstream subnet;
+        subnet << "10.1." << (a + 1) << ".0";
+        addr.SetBase(subnet.str().c_str(), "255.255.255.0");
+        Ipv4InterfaceContainer ifBh = addr.Assign(backhaulPair);
+
+        parentBhIp[a] = ifBh.GetAddress(0);
+        m_agentIp[a] = ifBh.GetAddress(1);
+        m_parentIfIndex[a] = ifBh.Get(0).second;
+        m_agentBackhaulIfIndex[a] = ifBh.Get(1).second;
+
+        if (m_agentParent[a] < 0 && m_controllerIp == Ipv4Address::GetAny())
+        {
+            m_controllerIp = ifBh.GetAddress(0);
         }
-        Ipv4Address apAddr = Ipv4Address(("192.168." + std::to_string(agentIdx) + ".1").c_str());
-        // Interface 1 là Wi-Fi (0 là loopback)
-        clientRouting->SetDefaultRoute(apAddr, 1);
-        NS_LOG_INFO("Added default route on STA" << c << " via " << apAddr);
     }
+
+    if (m_controllerIp == Ipv4Address::GetAny())
+    {
+        m_controllerIp = parentBhIp[0];
+    }
+
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    {
+        m_controllerBackhaulIp[a] = m_controllerIp;
+    }
+
+    NetDeviceContainer fronthaulGroup;
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    {
+        fronthaulGroup.Add(m_agentFronthaulDevices[a]);
+    }
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        fronthaulGroup.Add(m_clientFronthaulDevices[c]);
+    }
+
+    addr.SetBase("10.2.0.0", "255.255.255.0");
+    Ipv4InterfaceContainer ifFh = addr.Assign(fronthaulGroup);
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    {
+        m_agentFronthaulIp[a] = ifFh.GetAddress(a);
+        m_agentFronthaulIfIndex[a] = ifFh.Get(a).second;
+    }
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        m_clientIp[c] = ifFh.GetAddress(NUM_AGENT + c);
+        m_clientFronthaulIfIndex[c] = ifFh.Get(NUM_AGENT + c).second;
+    }
+
+    auto ctrlRouting = staticRoutingHelper.GetStaticRouting(m_controllerNode.Get(0)->GetObject<Ipv4>());
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    {
+        auto agentIpv4 = m_agentNodes.Get(a)->GetObject<Ipv4>();
+        agentIpv4->SetForwarding(m_agentBackhaulIfIndex[a], true);
+        agentIpv4->SetForwarding(m_agentFronthaulIfIndex[a], true);
+
+        auto agentRouting = staticRoutingHelper.GetStaticRouting(agentIpv4);
+        agentRouting->SetDefaultRoute(parentBhIp[a], m_agentBackhaulIfIndex[a]);
+    }
+
+    (void) children;
+    (void) ctrlRouting;
+    RebuildClientRoutes();
 
     NS_LOG_INFO("=== END Protocol Stack ===");
 }
 
-// ════════════════════════════════════════════════════════════════
-// ── TRAFFIC INSTALLATION ────────────────────────────────────────
-// (giữ nguyên, chỉ chạy với 1 STA)
-// ════════════════════════════════════════════════════════════════
-
-void EasyMeshSimulation::InstallUdpUplink()
+void 
+EasyMeshSimulation::InstallUdpUplink()
 {
-    PacketSinkHelper sink("ns3::UdpSocketFactory",
-        InetSocketAddress(Ipv4Address::GetAny(), PORT_UDP_UL));
-    ApplicationContainer sinks = sink.Install(m_controllerNode.Get(0));
-    sinks.Start(Seconds(0.5));
-    sinks.Stop(Seconds(m_duration));
+    UdpServerHelper server(PORT_UDP_UL);
+    ApplicationContainer serverApps = server.Install(m_controllerNode.Get(0));
+    serverApps.Start(Seconds(0.0));
+    serverApps.Stop(Seconds(m_duration + 1.0));
 
-    for (uint32_t c = 0; c < m_numClients; c++) {
-        OnOffHelper src("ns3::UdpSocketFactory",
-            InetSocketAddress(m_controllerIp, PORT_UDP_UL));
-        src.SetAttribute("DataRate",  StringValue(UL_DATA_RATE));
-        src.SetAttribute("PacketSize", UintegerValue(UL_PKT_SIZE));
-        src.SetAttribute("OnTime",    StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-        src.SetAttribute("OffTime",   StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+    double intervalUs = (UL_PKT_SIZE * 8.0) / (UL_OFFERED_MBPS * 1e6) * 1e6;
 
-        ApplicationContainer app = src.Install(m_clientNodes.Get(c));
-        double start = UL_START + c * 0.1;
-        app.Start(Seconds(start));
-        app.Stop(Seconds(m_duration - 1.0));
-        NS_LOG_INFO("UDP-UL: STA" << c << " -> Controller  " << UL_DATA_RATE);
+    for (uint32_t c = 0; c < m_numClients; c++)
+    {
+        UdpClientHelper client(m_controllerBackhaulIp[m_clientToAgent[c]], PORT_UDP_UL);
+        client.SetAttribute("MaxPackets", UintegerValue(UINT32_MAX));
+        client.SetAttribute("Interval", TimeValue(MicroSeconds(intervalUs)));
+        client.SetAttribute("PacketSize", UintegerValue(UL_PKT_SIZE));
+
+        ApplicationContainer app = client.Install(m_clientNodes.Get(c));
+        app.Start(Seconds(UL_START));
+        app.Stop(Seconds(m_duration));
+        NS_LOG_INFO("UDP-UL: STA" << c << " -> Controller  payload="
+                    << UL_PKT_SIZE << "B offered=" << UL_OFFERED_MBPS << "Mbps");
     }
 }
 
-void EasyMeshSimulation::InstallUdpDownlink()
+void 
+EasyMeshSimulation::InstallUdpDownlink()
 {
     for (uint32_t c = 0; c < m_numClients; c++) {
         Ipv4Address staIp = m_clientIp[c];
@@ -465,7 +859,8 @@ void EasyMeshSimulation::InstallUdpDownlink()
     }
 }
 
-void EasyMeshSimulation::InstallTcpUplink()
+void 
+EasyMeshSimulation::InstallTcpUplink()
 {
     PacketSinkHelper tcpSink("ns3::TcpSocketFactory",
         InetSocketAddress(Ipv4Address::GetAny(), PORT_TCP_UL));
@@ -486,31 +881,151 @@ void EasyMeshSimulation::InstallTcpUplink()
     }
 }
 
-void EasyMeshSimulation::InstallBackhaulStress()
+void 
+EasyMeshSimulation::InstallBackhaulStress()
 {
     // Không cần backhaul stress trong cấu hình nhỏ này
     NS_LOG_INFO("BackhaulStress disabled (only 2 agents)");
 }
 
-void EasyMeshSimulation::InstallApplications()
+void 
+EasyMeshSimulation::InstallApplications()
 {
     NS_LOG_INFO("=== InstallApplications ===");
     InstallUdpUplink();
-    InstallUdpDownlink();
-    InstallTcpUplink();
-    // InstallBackhaulStress();  // tắt
-    NS_LOG_INFO("Applications installed: "
-                << m_numClients << " UDP-UL  "
-                << m_numClients << " UDP-DL  "
-                << (m_numClients / 2) << " TCP-UL");
+    NS_LOG_INFO("Applications installed: " << m_numClients << " UDP uplink flow(s)");
 }
 
-// ════════════════════════════════════════════════════════════════
-// ScheduleEvents, Run, PrintResults (giữ nguyên)
-// ════════════════════════════════════════════════════════════════
-
-void EasyMeshSimulation::ScheduleEvents()
+void 
+EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
 {
+    NS_ASSERT(anim);
+
+    const uint8_t backhaulRed = 231;
+    const uint8_t backhaulGreen = 76;
+    const uint8_t backhaulBlue = 60;
+    const uint8_t fronthaulRed = 52;
+    const uint8_t fronthaulGreen = 152;
+    const uint8_t fronthaulBlue = 219;
+
+    for (const auto& link : m_links)
+    {
+        std::ostringstream label;
+        uint8_t red = fronthaulRed;
+        uint8_t green = fronthaulGreen;
+        uint8_t blue = fronthaulBlue;
+        if (link->GetType() == LinkType::BACKHAUL)
+        {
+            red = backhaulRed;
+            green = backhaulGreen;
+            blue = backhaulBlue;
+            uint32_t childAgent = 0;
+            for (; childAgent < NUM_AGENT; ++childAgent)
+            {
+                if (m_agentNodes.Get(childAgent) == link->GetDst())
+                {
+                    break;
+                }
+            }
+
+            if (link->GetSrc() == m_controllerNode.Get(0))
+            {
+                label << "UL A" << childAgent << "->C";
+            }
+            else
+            {
+                uint32_t parentAgent = 0;
+                for (; parentAgent < NUM_AGENT; ++parentAgent)
+                {
+                    if (m_agentNodes.Get(parentAgent) == link->GetSrc())
+                    {
+                        break;
+                    }
+                }
+                label << "UL A" << childAgent << "->A" << parentAgent;
+            }
+        }
+        else
+        {
+            uint32_t agentId = 0;
+            uint32_t clientId = 0;
+            for (; agentId < NUM_AGENT; ++agentId)
+            {
+                if (m_agentNodes.Get(agentId) == link->GetSrc())
+                {
+                    break;
+                }
+            }
+            for (; clientId < m_numClients; ++clientId)
+            {
+                if (m_clientNodes.Get(clientId) == link->GetDst())
+                {
+                    break;
+                }
+            }
+            label << "FH A" << agentId << "-STA" << clientId;
+        }
+
+        label << " RSSI=" << std::fixed << std::setprecision(1) << link->GetRssi() << "dBm";
+        anim->UpdateLinkDescription(link->GetSrc(), link->GetDst(), label.str(), red, green, blue);
+    }
+}
+
+void 
+EasyMeshSimulation::ConfigureAnimation(AnimationInterface& anim)
+{
+    anim.SetStartTime(Seconds(UL_START));
+    anim.SetStopTime(Seconds(m_duration));
+    anim.SetMobilityPollInterval(Seconds(1.0));
+    anim.SetMaxPktsPerTraceFile(200000);
+    anim.SkipPacketTracing();
+
+    anim.UpdateNodeDescription(m_controllerNode.Get(0), "Controller");
+    anim.UpdateNodeColor(m_controllerNode.Get(0), 0, 102, 204);
+    anim.UpdateNodeSize(m_controllerNode.Get(0), 2.0, 2.0);
+
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    {
+        std::ostringstream name;
+        name << "Agent " << a << " UL->";
+        if (m_agentParent[a] < 0)
+        {
+            name << "C";
+        }
+        else
+        {
+            name << "A" << m_agentParent[a];
+        }
+        anim.UpdateNodeDescription(m_agentNodes.Get(a), name.str());
+        anim.UpdateNodeColor(m_agentNodes.Get(a), 46, 204, 113);
+        anim.UpdateNodeSize(m_agentNodes.Get(a), 2.0, 2.0);
+    }
+
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        std::ostringstream name;
+        name << "STA " << c << " -> A" << m_clientToAgent[c];
+        anim.UpdateNodeDescription(m_clientNodes.Get(c), name.str());
+        anim.UpdateNodeColor(m_clientNodes.Get(c), 231, 126, 35);
+        anim.UpdateNodeSize(m_clientNodes.Get(c), 1.0, 1.0);
+    }
+
+    Simulator::Schedule(Seconds(UL_START),
+                        &EasyMeshSimulation::UpdateAnimationLinks,
+                        this,
+                        &anim);
+
+}
+
+void 
+EasyMeshSimulation::ScheduleEvents()
+{
+    Simulator::Schedule(Seconds(1.0),
+                        &EasyMeshSimulation::SyncClientAssociations,
+                        this);
+    Simulator::Schedule(Seconds(1.5),
+                        &EasyMeshSimulation::SyncClientAssociations,
+                        this);
     for (double t = 5.0; t < m_duration; t += 5.0)
         Simulator::Schedule(Seconds(t),
             &EasyMeshController::CollectApMetrics, m_controller);
@@ -522,12 +1037,17 @@ void EasyMeshSimulation::ScheduleEvents()
             &EasyMeshController::OptimizeBackhaulTopology, m_controller);
 }
 
-void EasyMeshSimulation::Run()
+void 
+EasyMeshSimulation::Run()
 {
     NS_LOG_INFO("=== Simulation start  duration=" << m_duration << "s ===");
     m_monitor = m_monHelper.InstallAll();
+    std::ostringstream animationFile;
+    animationFile << "easymesh-sim-animation-run" << m_scenarioRun << ".xml";
+    AnimationInterface anim(animationFile.str());
+    ConfigureAnimation(anim);
     if (m_pcap) m_phyHelper.EnablePcapAll("easymesh");
-    Simulator::Stop(Seconds(m_duration));
+    Simulator::Stop(Seconds(m_duration + 2.0));
     Simulator::Run();
 
     Ptr<Ipv4FlowClassifier> clf =
@@ -536,10 +1056,12 @@ void EasyMeshSimulation::Run()
     m_controller->ApplyTrafficStats(m_trafficStats);
 
     Simulator::Destroy();
+    std::cout << "[EasyMeshSim] Animation saved to " << animationFile.str() << "\n";
     NS_LOG_INFO("=== Simulation complete ===");
 }
 
-void EasyMeshSimulation::PrintResults()
+void 
+EasyMeshSimulation::PrintResults()
 {
     m_controller->PrintTopology();
     m_controller->PrintSteeringLog();
@@ -548,38 +1070,43 @@ void EasyMeshSimulation::PrintResults()
     m_trafficStats.PrintNetworkSummary();
 }
 
-// ════════════════════════════════════════════════════════════════
-// main()
-// ════════════════════════════════════════════════════════════════
 int main(int argc, char* argv[])
 {
     LogComponentEnable("EasyMeshSim",        LOG_LEVEL_INFO);
     LogComponentEnable("EasyMeshController", LOG_LEVEL_INFO);
 
     double   duration   = DURATION;
-    uint32_t numClients = NUM_STA;          // CHỈ 1 STA
+    uint32_t scenarioRuns = SCENARIO_RUNS;
+    uint32_t numClients = NUM_STA;          
     bool     pcap       = false;
 
     CommandLine cmd;
     cmd.AddValue("duration", "Simulation duration (s)", duration);
+    cmd.AddValue("scenarios", "Number of randomized scenario runs", scenarioRuns);
     cmd.AddValue("clients",  "Number of STA clients",   numClients);
     cmd.AddValue("pcap",     "Enable PCAP capture",     pcap);
     cmd.Parse(argc, argv);
 
     RngSeedManager::SetSeed(42);
-    RngSeedManager::SetRun(1);
 
-    EasyMeshSimulation sim;
-    sim.SetDuration(duration);
-    sim.SetNumClients(numClients);
-    sim.EnablePcap(pcap);
+    for (uint32_t run = 1; run <= scenarioRuns; ++run)
+    {
+        std::cout << "\n=== Scenario " << run << "/" << scenarioRuns << " ===\n" << std::flush;
+        RngSeedManager::SetRun(run);
 
-    sim.BuildTopology();
-    sim.InstallProtocolStack();
-    sim.InstallApplications();
-    sim.ScheduleEvents();
-    sim.Run();
-    sim.PrintResults();
+        EasyMeshSimulation sim;
+        sim.SetDuration(duration);
+        sim.SetScenarioRun(run);
+        sim.SetNumClients(numClients);
+        sim.EnablePcap(pcap);
+
+        sim.BuildTopology();
+        sim.InstallProtocolStack();
+        sim.InstallApplications();
+        sim.ScheduleEvents();
+        sim.Run();
+        sim.PrintResults();
+    }
 
     return 0;
 }

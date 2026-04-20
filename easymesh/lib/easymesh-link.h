@@ -16,6 +16,7 @@ public:
     void UpdateMetrics(double rssi, double snr, uint32_t mcs,
                        double throughputMbps, double airtime);
     void PrintStatus() const;
+    void SetEndpoints(Ptr<Node> src, Ptr<Node> dst);
 
     // Getters
     uint32_t GetId()          const { return m_id; }

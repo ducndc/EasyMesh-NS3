@@ -20,6 +20,13 @@ EasyMeshLink::UpdateMetrics(double rssi, double snr, uint32_t mcs, double throug
     m_airtime = airtime;
 }
 
+void
+EasyMeshLink::SetEndpoints(Ptr<Node> src, Ptr<Node> dst)
+{
+    m_src = src;
+    m_dst = dst;
+}
+
 void 
 EasyMeshLink::PrintStatus() const 
 {

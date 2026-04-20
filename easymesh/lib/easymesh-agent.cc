@@ -11,13 +11,23 @@ EasyMeshAgent::EasyMeshAgent(uint32_t id, Ptr<Node> node, AgentRole role, Vector
 void 
 EasyMeshAgent::AddFronthaulLink(Ptr<EasyMeshLink> link) 
 {
-    m_fronthaulLinks.push_back(link);
+    if (std::find(m_fronthaulLinks.begin(), m_fronthaulLinks.end(), link) == m_fronthaulLinks.end())
+    {
+        m_fronthaulLinks.push_back(link);
+    }
 }
 
 void 
 EasyMeshAgent::AddBackhaulLink(Ptr<EasyMeshLink> link) 
 {
     m_backhaulLinks.push_back(link);
+}
+
+void 
+EasyMeshAgent::RemoveFronthaulLink(Ptr<EasyMeshLink> link)
+{
+    m_fronthaulLinks.erase(std::remove(m_fronthaulLinks.begin(), m_fronthaulLinks.end(), link),
+                           m_fronthaulLinks.end());
 }
 
 void 

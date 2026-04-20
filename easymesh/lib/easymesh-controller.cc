@@ -12,15 +12,9 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("EasyMeshController");
 
-// ────────────────────────────────────────────────────────────────
-// Constructor
-// ────────────────────────────────────────────────────────────────
 EasyMeshController::EasyMeshController(uint32_t id, Ptr<Node> node)
     : m_id(id), m_node(node) {}
 
-// ────────────────────────────────────────────────────────────────
-// Registry
-// ────────────────────────────────────────────────────────────────
 void 
 EasyMeshController::RegisterAgent(Ptr<EasyMeshAgent> agent)
 {
@@ -41,9 +35,6 @@ EasyMeshController::GetAgent(uint32_t agentId)
     return nullptr;
 }
 
-// ────────────────────────────────────────────────────────────────
-// EstimateRssi  – log-distance model (TxPow=20dBm, exp=3)
-// ────────────────────────────────────────────────────────────────
 double 
 EasyMeshController::EstimateRssi(Ptr<EasyMeshAgent> agent) const
 {
@@ -58,15 +49,13 @@ EasyMeshController::EstimateRssi(Ptr<EasyMeshAgent> agent) const
     return 20.0 + 3.0 + 3.0 - pl;
 }
 
-// ────────────────────────────────────────────────────────────────
-// SelectTargetAgent – pick least-loaded agent (excluding current)
-// ────────────────────────────────────────────────────────────────
 uint32_t 
 EasyMeshController::SelectTargetAgent(uint32_t excludeId) const
 {
     uint32_t best  = excludeId;
     double   bestL = 1e9;
-    for (auto& a : m_agents) {
+    for (auto& a : m_agents) 
+    {
         if (a->GetId() == excludeId) continue;
         double score = a->GetLoad() + a->GetChanUtil() * 0.5;
         if (score < bestL) { bestL = score; best = a->GetId(); }
@@ -74,16 +63,14 @@ EasyMeshController::SelectTargetAgent(uint32_t excludeId) const
     return best;
 }
 
-// ────────────────────────────────────────────────────────────────
-// CollectApMetrics  – scheduled every 5 s
-// ────────────────────────────────────────────────────────────────
 void 
 EasyMeshController::CollectApMetrics()
 {
     double t = Simulator::Now().GetSeconds();
     NS_LOG_INFO("[Controller t=" << t << "] AP_METRICS_REPORT");
 
-    for (auto& agent : m_agents) {
+    for (auto& agent : m_agents) 
+    {
         // Simulate load: 12% per associated client + random noise
         double jitter = ((rand() % 20) - 10) / 100.0;
         double load   = std::min(1.0, agent->GetClientCount() * 0.12 + jitter);
@@ -97,7 +84,8 @@ EasyMeshController::CollectApMetrics()
     }
 
     // Refresh backhaul link RSSI via mobility
-    for (auto& link : m_links) {
+    for (auto& link : m_links) 
+    {
         if (link->GetType() != LinkType::BACKHAUL) continue;
         Ptr<MobilityModel> sm = link->GetSrc()->GetObject<MobilityModel>();
         Ptr<MobilityModel> dm = link->GetDst()->GetObject<MobilityModel>();
@@ -114,27 +102,30 @@ EasyMeshController::CollectApMetrics()
     }
 }
 
-// ────────────────────────────────────────────────────────────────
-// RunSteeringEngine  – scheduled every 10 s
-// ────────────────────────────────────────────────────────────────
 void 
 EasyMeshController::RunSteeringEngine()
 {
     double t = Simulator::Now().GetSeconds();
     NS_LOG_INFO("[Controller t=" << t << "] STEERING ENGINE TICK");
 
-    for (auto& agent : m_agents) {
+    for (auto& agent : m_agents) 
+    {
         double rssi  = EstimateRssi(agent);
         SteeringReason reason;
         bool doSteer = false;
 
-        if (rssi < RSSI_STEER_THRESHOLD) {
+        if (rssi < RSSI_STEER_THRESHOLD) 
+        {
             reason   = SteeringReason::RSSI_LOW;
             doSteer  = true;
-        } else if (agent->GetLoad() > LOAD_STEER_THRESHOLD) {
+        } 
+        else if (agent->GetLoad() > LOAD_STEER_THRESHOLD) 
+        {
             reason   = SteeringReason::LOAD_BALANCE;
             doSteer  = true;
-        } else if (agent->GetChanUtil() > UTIL_STEER_THRESHOLD) {
+        } 
+        else if (agent->GetChanUtil() > UTIL_STEER_THRESHOLD) 
+        {
             reason   = SteeringReason::CHAN_UTIL;
             doSteer  = true;
         }
@@ -174,29 +165,27 @@ EasyMeshController::RunSteeringEngine()
     }
 }
 
-// ────────────────────────────────────────────────────────────────
-// OptimizeBackhaulTopology  – scheduled every 20 s
-// ────────────────────────────────────────────────────────────────
 void 
 EasyMeshController::OptimizeBackhaulTopology()
 {
     NS_LOG_INFO("[Controller t=" << Simulator::Now().GetSeconds()
                 << "] BACKHAUL TOPOLOGY OPTIMIZATION");
-    for (auto& link : m_links) {
+    for (auto& link : m_links) 
+    {
         if (link->GetType() != LinkType::BACKHAUL) continue;
-        if (link->GetRssi() < -85.0) {
+        if (link->GetRssi() < -85.0) 
+        {
             link->SetActive(false);
             NS_LOG_INFO("  Deactivated weak link[" << link->GetId()
                         << "] RSSI=" << link->GetRssi() << "dBm");
-        } else {
+        } 
+        else 
+        {
             link->SetActive(true);
         }
     }
 }
 
-// ────────────────────────────────────────────────────────────────
-// ApplyTrafficStats  – called post-simulation
-// ────────────────────────────────────────────────────────────────
 void 
 EasyMeshController::ApplyTrafficStats(const TrafficStats& ts)
 {
@@ -209,7 +198,8 @@ EasyMeshController::ApplyTrafficStats(const TrafficStats& ts)
 
     // Without exact STA↔Agent mapping we round-robin assign
     int idx = 0;
-    for (auto& f : flows) {
+    for (auto& f : flows) 
+    {
         uint32_t aid = idx % m_agents.size();
         agentTput[aid]  += f.throughputMbps;
         agentDelay[aid] += f.meanDelayMs;
@@ -217,7 +207,9 @@ EasyMeshController::ApplyTrafficStats(const TrafficStats& ts)
         agentFlows[aid]++;
         idx++;
     }
-    for (auto& agent : m_agents) {
+
+    for (auto& agent : m_agents) 
+    {
         uint32_t aid = agent->GetId();
         int      cnt = agentFlows.count(aid) ? agentFlows[aid] : 1;
         agent->AddUlThroughput(agentTput[aid] * 0.5);
@@ -227,9 +219,6 @@ EasyMeshController::ApplyTrafficStats(const TrafficStats& ts)
     }
 }
 
-// ────────────────────────────────────────────────────────────────
-// PrintTopology
-// ────────────────────────────────────────────────────────────────
 void 
 EasyMeshController::PrintTopology() const
 {
@@ -239,7 +228,8 @@ EasyMeshController::PrintTopology() const
     std::cout << "  Controller[" << m_id << "]   Agents: " << m_agents.size()
               << "   Links: " << m_links.size() << "\n\n";
 
-    for (auto& ag : m_agents) {
+    for (auto& ag : m_agents) 
+    {
         std::string roleStr = (ag->GetRole() == AgentRole::HYBRID)         ? "HYBRID" :
                               (ag->GetRole() == AgentRole::FRONTHAUL_ONLY) ? "FH_ONLY" : "BH_ONLY";
         Vector p = ag->GetPosition();
@@ -250,14 +240,17 @@ EasyMeshController::PrintTopology() const
                   << "  chanUtil=" << (int)(ag->GetChanUtil() * 100) << "%"
                   << "  steerOut/In=" << ag->GetSteeredOut() << "/" << ag->GetSteeredIn() << "\n";
 
-        for (auto& l : ag->GetBackhaulLinks()) {
+        for (auto& l : ag->GetBackhaulLinks()) 
+        {
             std::cout << "  │  BH-Link[" << l->GetId() << "]"
                       << "  RSSI=" << std::fixed << std::setprecision(1) << l->GetRssi() << "dBm"
                       << "  MCS=" << l->GetMcs()
                       << "  Tput=" << l->GetThroughput() << "Mbps"
                       << "  " << (l->IsActive() ? "ACTIVE" : "INACTIVE") << "\n";
         }
-        for (auto& l : ag->GetFronthaulLinks()) {
+
+        for (auto& l : ag->GetFronthaulLinks()) 
+        {
             std::cout << "  │  FH-Link[" << l->GetId() << "]"
                       << "  RSSI=" << l->GetRssi() << "dBm"
                       << "  " << (l->IsActive() ? "ACTIVE" : "INACTIVE") << "\n";
@@ -266,9 +259,6 @@ EasyMeshController::PrintTopology() const
     }
 }
 
-// ────────────────────────────────────────────────────────────────
-// PrintSteeringLog
-// ────────────────────────────────────────────────────────────────
 void 
 EasyMeshController::PrintSteeringLog() const
 {
@@ -276,7 +266,8 @@ EasyMeshController::PrintSteeringLog() const
     std::cout << "║                          BSS Steering Log                                    ║\n";
     std::cout << "╚══════════════════════════════════════════════════════════════════════════════╝\n";
 
-    if (m_steeringLog.empty()) {
+    if (m_steeringLog.empty()) 
+    {
         std::cout << "  (No steering events)\n";
         return;
     }
@@ -290,7 +281,8 @@ EasyMeshController::PrintSteeringLog() const
               << "OK?\n";
     std::cout << std::string(70, '-') << "\n";
 
-    for (auto& ev : m_steeringLog) {
+    for (auto& ev : m_steeringLog) 
+    {
         std::cout << std::left
                   << std::setw(8)  << std::fixed << std::setprecision(1) << ev.timeS
                   << std::setw(8)  << ev.clientId
@@ -302,9 +294,6 @@ EasyMeshController::PrintSteeringLog() const
     }
 }
 
-// ────────────────────────────────────────────────────────────────
-// PrintAgentTraffic
-// ────────────────────────────────────────────────────────────────
 void 
 EasyMeshController::PrintAgentTraffic() const
 {
@@ -321,7 +310,8 @@ EasyMeshController::PrintAgentTraffic() const
               << "Load%\n";
     std::cout << std::string(74, '-') << "\n";
 
-    for (auto& ag : m_agents) {
+    for (auto& ag : m_agents) 
+    {
         std::cout << std::left
                   << std::setw(8)  << ag->GetId()
                   << std::setw(10) << ag->GetClientCount()
