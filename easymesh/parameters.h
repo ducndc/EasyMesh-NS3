@@ -5,7 +5,7 @@
 #define DURATION        15.0    // s – total simulation time
 #define SCENARIO_RUNS   10
 #define NUM_AGENT       4
-#define NUM_STA         1
+#define NUM_STA         3
 #define NUM_CONTROLLER	1
 
 // ── Traffic – UDP CBR (OnOff) ────────────────────────────────
@@ -36,6 +36,10 @@
 // ── Wi-Fi configuration ──────────────────────────────────────
 #define WIFI_CHANNEL_SETTINGS "{42, 80, BAND_5GHZ, 0}"
 #define WIFI_BEACON_INTERVAL_US 102400
+
+// ── Agent failure event ──────────────────────────────────────
+#define OFFLINE_AGENT_ID 1
+#define OFFLINE_TIME     6.0
 
 // ── Topology optimization ─────────────────────────────────────
 #define TOPOLOGY_AREA_MIN_X 5.0

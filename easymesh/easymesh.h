@@ -44,6 +44,8 @@ public:
     // ── CLI overrides ─────────────────────────────────────────
     void SetDuration(double s)   { m_duration   = s; }
     void SetScenarioRun(uint32_t run) { m_scenarioRun = run; }
+    void SetOfflineAgentId(uint32_t agentId) { m_offlineAgentId = agentId; }
+    void SetOfflineTime(double timeSeconds) { m_offlineTime = timeSeconds; }
     void SetNumClients(uint32_t n)
     {
         m_numClients = n;
@@ -74,10 +76,14 @@ private:
     double EstimateLinkRssi(Vector a, Vector b) const;
     double EstimateLinkThroughput(double rssi) const;
     Vector GetAgentPosition(uint32_t agentId) const;
+    bool IsAgentOnline(uint32_t agentId) const;
     uint32_t FindAgentForFronthaulBssid(Mac48Address bssid) const;
     void UpdateClientAssociation(uint32_t clientId, uint32_t agentId);
     void RebuildClientRoutes();
     void SyncClientAssociations();
+    void RefreshBackhaulLinks();
+    void HandleAgentOffline();
+    void UpdateAnimationNodes(AnimationInterface* anim);
 
     // ── Traffic installers ────────────────────────────────────
     void InstallUdpUplink();        // STA → Controller  (CBR)
@@ -113,6 +119,7 @@ private:
     std::vector<uint32_t>    m_clientFronthaulIfIndex;
     std::vector<Vector>      m_agentPositions;
     std::vector<int32_t>     m_agentParent;
+    std::vector<bool>        m_agentOnline;
 
     // ── EasyMesh logical objects ──────────────────────────────
     Ptr<EasyMeshController>          m_controller;
@@ -135,7 +142,10 @@ private:
     double   m_duration   = DURATION;
     uint32_t m_numClients = NUM_STA;
     uint32_t m_scenarioRun = 1;
+    uint32_t m_offlineAgentId = OFFLINE_AGENT_ID;
+    double   m_offlineTime = OFFLINE_TIME;
     bool     m_pcap       = false;
+    AnimationInterface* m_animation = nullptr;
 
     // ── Static topology ───────────────────────────────────────
     static const Vector AGENT_POSITIONS[NUM_AGENT];

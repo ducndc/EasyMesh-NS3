@@ -35,6 +35,7 @@ EasyMeshSimulation::EasyMeshSimulation()
     m_clientFronthaulIfIndex.resize(NUM_STA, 0);
     m_agentPositions.resize(NUM_AGENT, CONTROLLER_POS);
     m_agentParent.resize(NUM_AGENT, -1);
+    m_agentOnline.resize(NUM_AGENT, true);
 }
 
 EasyMeshSimulation::~EasyMeshSimulation() {}
@@ -74,6 +75,12 @@ EasyMeshSimulation::GetAgentPosition(uint32_t agentId) const
         }
     }
     return m_agentPositions.at(agentId);
+}
+
+bool
+EasyMeshSimulation::IsAgentOnline(uint32_t agentId) const
+{
+    return agentId < m_agentOnline.size() && m_agentOnline[agentId];
 }
 
 void
@@ -188,6 +195,11 @@ EasyMeshSimulation::BuildBackhaulTree()
 
     for (auto agentId : order)
     {
+        if (!IsAgentOnline(agentId))
+        {
+            continue;
+        }
+
         const auto directRssi = EstimateLinkRssi(CONTROLLER_POS, m_agentPositions[agentId]);
         const auto directCapacity = EstimateLinkThroughput(directRssi);
         const auto directDistance = ComputeDistance(CONTROLLER_POS, m_agentPositions[agentId]);
@@ -198,6 +210,11 @@ EasyMeshSimulation::BuildBackhaulTree()
 
         for (auto candidate : connected)
         {
+            if (!IsAgentOnline(candidate))
+            {
+                continue;
+            }
+
             const auto candidateDistance = ComputeDistance(CONTROLLER_POS, m_agentPositions[candidate]);
             if (candidateDistance >= directDistance)
             {
@@ -262,6 +279,39 @@ EasyMeshSimulation::FindFronthaulLinkForClient(uint32_t clientId) const
         }
     }
     return nullptr;
+}
+
+void
+EasyMeshSimulation::RefreshBackhaulLinks()
+{
+    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    {
+        auto link = FindBackhaulLinkForAgent(agentId);
+        if (!link)
+        {
+            continue;
+        }
+
+        if (!IsAgentOnline(agentId))
+        {
+            link->SetActive(false);
+            continue;
+        }
+
+        Ptr<Node> parentNode = (m_agentParent[agentId] < 0) ? m_controllerNode.Get(0)
+                                                             : m_agentNodes.Get(m_agentParent[agentId]);
+        Vector parentPosition = (m_agentParent[agentId] < 0) ? CONTROLLER_POS
+                                                              : GetAgentPosition(m_agentParent[agentId]);
+        const auto childPosition = GetAgentPosition(agentId);
+        const auto rssi = EstimateLinkRssi(parentPosition, childPosition);
+        const auto snr = rssi - (-95.0);
+        const auto mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
+        const auto throughput = EstimateLinkThroughput(rssi);
+
+        link->SetEndpoints(parentNode, m_agentNodes.Get(agentId));
+        link->UpdateMetrics(rssi, snr, mcs, throughput, 0.0);
+        link->SetActive(true);
+    }
 }
 
 uint32_t
@@ -423,15 +473,24 @@ EasyMeshSimulation::SelectBestUplinkAgent(uint32_t clientId) const
     Ptr<MobilityModel> clientMobility = m_clientNodes.Get(clientId)->GetObject<MobilityModel>();
     Vector clientPosition = clientMobility->GetPosition();
 
-    uint32_t bestAgent = 0;
+    uint32_t bestAgent = NUM_AGENT;
     double bestScore = -std::numeric_limits<double>::infinity();
 
     for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
     {
+        if (!IsAgentOnline(agentId))
+        {
+            continue;
+        }
+
         const auto fronthaulRssi = EstimateLinkRssi(clientPosition, GetAgentPosition(agentId));
         const auto fronthaulThroughput = EstimateLinkThroughput(fronthaulRssi);
 
         auto backhaulLink = FindBackhaulLinkForAgent(agentId);
+        if (backhaulLink && !backhaulLink->IsActive())
+        {
+            continue;
+        }
         double backhaulThroughput = backhaulLink ? backhaulLink->GetThroughput() : 0.0;
         double backhaulRssi = backhaulLink ? backhaulLink->GetRssi() : -100.0;
 
@@ -442,6 +501,19 @@ EasyMeshSimulation::SelectBestUplinkAgent(uint32_t clientId) const
         {
             bestScore = score;
             bestAgent = agentId;
+        }
+    }
+
+    if (bestAgent < NUM_AGENT)
+    {
+        return bestAgent;
+    }
+
+    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    {
+        if (IsAgentOnline(agentId))
+        {
+            return agentId;
         }
     }
 
@@ -574,6 +646,91 @@ EasyMeshSimulation::CreateBackhaulLinks()
         NS_LOG_INFO("BH Wi-Fi: " << parentName.str() << " <-> Agent" << a << "(STA)"
                     << "  dist=" << dist << "m  RSSI=" << rssi
                     << "dBm  MCS=" << mcs << "  Tput=" << tput << "Mbps");
+    }
+}
+
+void
+EasyMeshSimulation::HandleAgentOffline()
+{
+    if (m_offlineAgentId >= NUM_AGENT)
+    {
+        NS_LOG_WARN("Ignoring offline event: invalid agent id " << m_offlineAgentId);
+        return;
+    }
+
+    if (!IsAgentOnline(m_offlineAgentId))
+    {
+        return;
+    }
+
+    NS_LOG_INFO("[Controller t=" << Simulator::Now().GetSeconds() << "] AGENT_OFFLINE A"
+                << m_offlineAgentId);
+
+    std::vector<int32_t> previousParents = m_agentParent;
+    m_agentOnline[m_offlineAgentId] = false;
+
+    auto offlineBackhaulLink = FindBackhaulLinkForAgent(m_offlineAgentId);
+    if (offlineBackhaulLink)
+    {
+        offlineBackhaulLink->SetActive(false);
+    }
+
+    BuildBackhaulTree();
+    RefreshBackhaulLinks();
+
+    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    {
+        if (!IsAgentOnline(agentId) || previousParents[agentId] == m_agentParent[agentId])
+        {
+            continue;
+        }
+
+        std::ostringstream oldParent;
+        std::ostringstream newParent;
+        if (previousParents[agentId] < 0)
+        {
+            oldParent << "C";
+        }
+        else
+        {
+            oldParent << "A" << previousParents[agentId];
+        }
+        if (m_agentParent[agentId] < 0)
+        {
+            newParent << "C";
+        }
+        else
+        {
+            newParent << "A" << m_agentParent[agentId];
+        }
+
+        NS_LOG_INFO("Agent" << agentId << " reselected uplink "
+                    << oldParent.str() << " -> " << newParent.str());
+    }
+
+    bool updatedClients = false;
+    for (uint32_t clientId = 0; clientId < m_numClients; ++clientId)
+    {
+        const auto currentAgent = m_clientToAgent[clientId];
+        const auto newAgent = SelectBestUplinkAgent(clientId);
+        if (newAgent >= NUM_AGENT || newAgent == currentAgent)
+        {
+            continue;
+        }
+
+        NS_LOG_INFO("STA" << clientId << " uplink reselected A" << currentAgent
+                    << " -> A" << newAgent << " after Agent" << m_offlineAgentId << " offline");
+        UpdateClientAssociation(clientId, newAgent);
+        updatedClients = true;
+    }
+
+    (void) updatedClients;
+    RebuildClientRoutes();
+
+    if (m_animation)
+    {
+        UpdateAnimationNodes(m_animation);
+        UpdateAnimationLinks(m_animation);
     }
 }
 
@@ -896,6 +1053,57 @@ EasyMeshSimulation::InstallApplications()
     NS_LOG_INFO("Applications installed: " << m_numClients << " UDP uplink flow(s)");
 }
 
+void
+EasyMeshSimulation::UpdateAnimationNodes(AnimationInterface* anim)
+{
+    NS_ASSERT(anim);
+
+    anim->UpdateNodeDescription(m_controllerNode.Get(0), "Controller");
+    anim->UpdateNodeColor(m_controllerNode.Get(0), 0, 102, 204);
+    anim->UpdateNodeSize(m_controllerNode.Get(0), 2.0, 2.0);
+
+    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    {
+        std::ostringstream name;
+        if (!IsAgentOnline(a))
+        {
+            name << "Agent " << a << " OFFLINE";
+            anim->UpdateNodeColor(m_agentNodes.Get(a), 127, 140, 141);
+        }
+        else
+        {
+            name << "Agent " << a << " UL->";
+            if (m_agentParent[a] < 0)
+            {
+                name << "C";
+            }
+            else
+            {
+                name << "A" << m_agentParent[a];
+            }
+            anim->UpdateNodeColor(m_agentNodes.Get(a), 46, 204, 113);
+        }
+        anim->UpdateNodeDescription(m_agentNodes.Get(a), name.str());
+        anim->UpdateNodeSize(m_agentNodes.Get(a), 2.0, 2.0);
+    }
+
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        std::ostringstream name;
+        if (m_clientToAgent[c] < NUM_AGENT)
+        {
+            name << "STA " << c << " -> A" << m_clientToAgent[c];
+        }
+        else
+        {
+            name << "STA " << c << " -> none";
+        }
+        anim->UpdateNodeDescription(m_clientNodes.Get(c), name.str());
+        anim->UpdateNodeColor(m_clientNodes.Get(c), 231, 126, 35);
+        anim->UpdateNodeSize(m_clientNodes.Get(c), 1.0, 1.0);
+    }
+}
+
 void 
 EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
 {
@@ -914,11 +1122,23 @@ EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
         uint8_t red = fronthaulRed;
         uint8_t green = fronthaulGreen;
         uint8_t blue = fronthaulBlue;
+        if (!link->IsActive())
+        {
+            red = 127;
+            green = 140;
+            blue = 141;
+        }
         if (link->GetType() == LinkType::BACKHAUL)
         {
             red = backhaulRed;
             green = backhaulGreen;
             blue = backhaulBlue;
+            if (!link->IsActive())
+            {
+                red = 127;
+                green = 140;
+                blue = 141;
+            }
             uint32_t childAgent = 0;
             for (; childAgent < NUM_AGENT; ++childAgent)
             {
@@ -966,6 +1186,10 @@ EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
             label << "FH A" << agentId << "-STA" << clientId;
         }
 
+        if (!link->IsActive())
+        {
+            label << " OFFLINE";
+        }
         label << " RSSI=" << std::fixed << std::setprecision(1) << link->GetRssi() << "dBm";
         anim->UpdateLinkDescription(link->GetSrc(), link->GetDst(), label.str(), red, green, blue);
     }
@@ -980,35 +1204,7 @@ EasyMeshSimulation::ConfigureAnimation(AnimationInterface& anim)
     anim.SetMaxPktsPerTraceFile(200000);
     anim.SkipPacketTracing();
 
-    anim.UpdateNodeDescription(m_controllerNode.Get(0), "Controller");
-    anim.UpdateNodeColor(m_controllerNode.Get(0), 0, 102, 204);
-    anim.UpdateNodeSize(m_controllerNode.Get(0), 2.0, 2.0);
-
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
-    {
-        std::ostringstream name;
-        name << "Agent " << a << " UL->";
-        if (m_agentParent[a] < 0)
-        {
-            name << "C";
-        }
-        else
-        {
-            name << "A" << m_agentParent[a];
-        }
-        anim.UpdateNodeDescription(m_agentNodes.Get(a), name.str());
-        anim.UpdateNodeColor(m_agentNodes.Get(a), 46, 204, 113);
-        anim.UpdateNodeSize(m_agentNodes.Get(a), 2.0, 2.0);
-    }
-
-    for (uint32_t c = 0; c < m_numClients; ++c)
-    {
-        std::ostringstream name;
-        name << "STA " << c << " -> A" << m_clientToAgent[c];
-        anim.UpdateNodeDescription(m_clientNodes.Get(c), name.str());
-        anim.UpdateNodeColor(m_clientNodes.Get(c), 231, 126, 35);
-        anim.UpdateNodeSize(m_clientNodes.Get(c), 1.0, 1.0);
-    }
+    UpdateAnimationNodes(&anim);
 
     Simulator::Schedule(Seconds(UL_START),
                         &EasyMeshSimulation::UpdateAnimationLinks,
@@ -1026,6 +1222,12 @@ EasyMeshSimulation::ScheduleEvents()
     Simulator::Schedule(Seconds(1.5),
                         &EasyMeshSimulation::SyncClientAssociations,
                         this);
+    if (m_offlineTime > UL_START && m_offlineTime < m_duration)
+    {
+        Simulator::Schedule(Seconds(m_offlineTime),
+                            &EasyMeshSimulation::HandleAgentOffline,
+                            this);
+    }
     for (double t = 5.0; t < m_duration; t += 5.0)
         Simulator::Schedule(Seconds(t),
             &EasyMeshController::CollectApMetrics, m_controller);
@@ -1045,6 +1247,7 @@ EasyMeshSimulation::Run()
     std::ostringstream animationFile;
     animationFile << "easymesh-sim-animation-run" << m_scenarioRun << ".xml";
     AnimationInterface anim(animationFile.str());
+    m_animation = &anim;
     ConfigureAnimation(anim);
     if (m_pcap) m_phyHelper.EnablePcapAll("easymesh");
     Simulator::Stop(Seconds(m_duration + 2.0));
@@ -1055,6 +1258,7 @@ EasyMeshSimulation::Run()
     m_trafficStats.Collect(m_monitor, clf);
     m_controller->ApplyTrafficStats(m_trafficStats);
 
+    m_animation = nullptr;
     Simulator::Destroy();
     std::cout << "[EasyMeshSim] Animation saved to " << animationFile.str() << "\n";
     NS_LOG_INFO("=== Simulation complete ===");
@@ -1078,12 +1282,16 @@ int main(int argc, char* argv[])
     double   duration   = DURATION;
     uint32_t scenarioRuns = SCENARIO_RUNS;
     uint32_t numClients = NUM_STA;          
+    uint32_t offlineAgentId = OFFLINE_AGENT_ID;
+    double   offlineTime = OFFLINE_TIME;
     bool     pcap       = false;
 
     CommandLine cmd;
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("scenarios", "Number of randomized scenario runs", scenarioRuns);
     cmd.AddValue("clients",  "Number of STA clients",   numClients);
+    cmd.AddValue("offlineAgent", "Agent id to take offline during the run", offlineAgentId);
+    cmd.AddValue("offlineTime", "Time in seconds when the agent goes offline", offlineTime);
     cmd.AddValue("pcap",     "Enable PCAP capture",     pcap);
     cmd.Parse(argc, argv);
 
@@ -1098,6 +1306,8 @@ int main(int argc, char* argv[])
         sim.SetDuration(duration);
         sim.SetScenarioRun(run);
         sim.SetNumClients(numClients);
+        sim.SetOfflineAgentId(offlineAgentId);
+        sim.SetOfflineTime(offlineTime);
         sim.EnablePcap(pcap);
 
         sim.BuildTopology();
