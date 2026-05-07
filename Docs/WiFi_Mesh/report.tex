@@ -1,0 +1,107 @@
+\documentclass{tudelft-report}
+
+%% Set up the bibliography
+\usepackage{biblatex}
+\addbibresource{report.bib}
+\usepackage[utf8]{inputenc}
+\usepackage[vietnamese]{babel}
+
+\usepackage{amsmath}
+\usepackage{graphicx}
+
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows}
+\usetikzlibrary{arrows.meta, positioning}
+
+\usepackage{algpseudocode}
+\usepackage{algorithm2e}
+\SetAlgoLined
+\SetKwProg{MyStruct}{Struct}{ contains}{end}
+
+\usepackage{forest}
+
+\definecolor{folderbg}{RGB}{124,166,198}
+\definecolor{folderborder}{RGB}{110,144,169}
+
+\def\Size{4pt}
+\tikzset{
+  folder/.pic={
+    \filldraw[draw=folderborder,top color=folderbg!50,bottom color=folderbg]
+      (-1.05*\Size,0.2\Size+5pt) rectangle ++(.75*\Size,-0.2\Size-5pt);  
+    \filldraw[draw=folderborder,top color=folderbg!50,bottom color=folderbg]
+      (-1.15*\Size,-\Size) rectangle (1.15*\Size,\Size);
+  }
+}
+
+%% Additional packages and commands
+\usepackage{parskip}
+\setlist{itemsep=-2pt} % Reducing white space in lists slightly
+\renewcommand{\deg}{\si{\degree}\xspace} % Use \deg easily, everywhere
+
+%% ----------------------------------------------------------------------
+%%    Begin of document + Frontmatter (Roman page numbering)
+%% ----------------------------------------------------------------------
+
+\begin{document}
+
+\frontmatter
+
+%% Define the main parameters
+\title{Wi-Fi Mesh}
+\subtitle{Tài Liệu Thiết Kế}
+\author{Wi-Fi Team}
+
+\subject{Trung Tâm Nghiên Cứu Công Nghệ Truyền Dẫn } % Cover only
+\affiliation{Tổng công ty Công nghiệp Công nghệ cao Viettel} % Cover only
+\coverimage{figures/cover_.jpg} % Aspect ratio of 2:3 (portrait) recommended
+\definecolor{title}{HTML}{4884d6} % Color for cover title
+
+\makecover
+
+\input{frontmatter/title-report}
+\input{frontmatter/preface}
+\input{frontmatter/summary}
+
+\tableofcontents
+%\listoffigures
+%\listoftables
+
+\input{frontmatter/nomenclature}
+
+%% ----------------------------------------------------------------------
+%%    Mainmatter (Arabic page numbering)
+%% ----------------------------------------------------------------------
+
+\mainmatter
+
+\input{mainmatter/introduction}
+
+\input{mainmatter/chapter-2}
+\input{mainmatter/Onboarding}
+\input{mainmatter/AutoConfiguration}
+\input{mainmatter/TopologyManagerment}
+\input{mainmatter/ClientManagerment}
+\input{mainmatter/SteeringManagerment}
+\input{mainmatter/NetworkOptimization}
+\input{mainmatter/TrafficSeparation}
+\input{mainmatter/conclusion}
+
+%% Prevent urls running into margins in bibliography
+\setcounter{biburlnumpenalty}{7000}
+\setcounter{biburllcpenalty}{7000}
+\setcounter{biburlucpenalty}{7000}
+
+%% Add bibliography
+\printbibliography[heading=bibintoc,title=References]
+
+%% ----------------------------------------------------------------------
+%%    Appendix (Letters for chapters)
+%% ----------------------------------------------------------------------
+
+\appendix
+
+\input{appendix/appendix-a}
+\input{appendix/appendix-b}
+%\input{appendix/appendix-c} % Create file to add
+
+\end{document}

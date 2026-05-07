@@ -1,0 +1,26 @@
+\babel@toc {vietnamese}{}\relax 
+\contentsline {chapter}{Lời Mở Đầu}{i}{chapter*.1}%
+\contentsline {chapter}{ Tóm Tắt}{ii}{chapter*.2}%
+\contentsline {chapter}{Viết Tắt và Ký Hiệu}{iv}{chapter*.4}%
+\contentsline {chapter}{\numberline {1}GIỚI THIỆU}{1}{chapter.1}%
+\contentsline {chapter}{\numberline {2}HỆ THỐNG EASYMESH}{2}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Tổng quan hệ thống Wi-Fi Mesh}{2}{section.2.1}%
+\contentsline {subsection}{\numberline {2.1.1}Triển khai thực tế hệ thống Wi-Fi Mesh của VHT}{4}{subsection.2.1.1}%
+\contentsline {section}{\numberline {2.2}Các chức năng của hệ thống Wi-Fi Mesh}{4}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Đồng bộ cấu hình}{4}{subsection.2.2.1}%
+\contentsline {subsection}{\numberline {2.2.2}Quản lý thiết bị}{5}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3} Chuyển vùng cho STA }{6}{subsection.2.2.3}%
+\contentsline {subsubsection}{ Chuyển băng tần trên cùng AP }{6}{subsection.2.2.3}%
+\contentsline {subsubsection}{ Chuyển vùng giữa các AP}{7}{figure.caption.15}%
+\contentsline {section}{\numberline {2.3}Một số vấn đề trong mạng Wi-Fi Mesh cần lưu ý}{7}{section.2.3}%
+\contentsline {chapter}{\numberline {3}ONBOARDING}{14}{chapter.3}%
+\contentsline {chapter}{\numberline {4}ĐỒNG BỘ CẤU HÌNH}{15}{chapter.4}%
+\contentsline {chapter}{\numberline {5}QUẢN LÝ TOPOLOGY}{16}{chapter.5}%
+\contentsline {chapter}{\numberline {6}QUẢN LÝ THIẾT BỊ KẾT NỐI}{17}{chapter.6}%
+\contentsline {chapter}{\numberline {7}QUẢN LÝ CHUYỂN VÙNG VÀ BĂNG TẦN}{18}{chapter.7}%
+\contentsline {chapter}{\numberline {8}TỐI ƯU KẾT NỐI TOPOLOGY}{19}{chapter.8}%
+\contentsline {chapter}{\numberline {9}PHÂN LUỒNG DỮ LIỆU}{20}{chapter.9}%
+\contentsline {chapter}{\numberline {10}TỔNG KẾT}{21}{chapter.10}%
+\contentsline {chapter}{\numberline {A} Code Minh Họa}{22}{appendix.A}%
+\contentsline {chapter}{\numberline {B} Nhiệm Vụ Liên Quan}{23}{appendix.B}%
+\contentsfinish 
