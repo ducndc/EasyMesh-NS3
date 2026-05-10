@@ -1,26 +1,97 @@
 \babel@toc {vietnamese}{}\relax 
 \contentsline {chapter}{Lời Mở Đầu}{i}{chapter*.1}%
 \contentsline {chapter}{ Tóm Tắt}{ii}{chapter*.2}%
-\contentsline {chapter}{Viết Tắt và Ký Hiệu}{iv}{chapter*.4}%
+\contentsline {chapter}{Viết Tắt và Ký Hiệu}{vi}{chapter*.4}%
 \contentsline {chapter}{\numberline {1}GIỚI THIỆU}{1}{chapter.1}%
 \contentsline {chapter}{\numberline {2}HỆ THỐNG EASYMESH}{2}{chapter.2}%
-\contentsline {section}{\numberline {2.1}Tổng quan hệ thống Wi-Fi Mesh}{2}{section.2.1}%
-\contentsline {subsection}{\numberline {2.1.1}Triển khai thực tế hệ thống Wi-Fi Mesh của VHT}{4}{subsection.2.1.1}%
-\contentsline {section}{\numberline {2.2}Các chức năng của hệ thống Wi-Fi Mesh}{4}{section.2.2}%
-\contentsline {subsection}{\numberline {2.2.1}Đồng bộ cấu hình}{4}{subsection.2.2.1}%
-\contentsline {subsection}{\numberline {2.2.2}Quản lý thiết bị}{5}{subsection.2.2.2}%
-\contentsline {subsection}{\numberline {2.2.3} Chuyển vùng cho STA }{6}{subsection.2.2.3}%
-\contentsline {subsubsection}{ Chuyển băng tần trên cùng AP }{6}{subsection.2.2.3}%
-\contentsline {subsubsection}{ Chuyển vùng giữa các AP}{7}{figure.caption.15}%
-\contentsline {section}{\numberline {2.3}Một số vấn đề trong mạng Wi-Fi Mesh cần lưu ý}{7}{section.2.3}%
-\contentsline {chapter}{\numberline {3}ONBOARDING}{14}{chapter.3}%
-\contentsline {chapter}{\numberline {4}ĐỒNG BỘ CẤU HÌNH}{15}{chapter.4}%
-\contentsline {chapter}{\numberline {5}QUẢN LÝ TOPOLOGY}{16}{chapter.5}%
-\contentsline {chapter}{\numberline {6}QUẢN LÝ THIẾT BỊ KẾT NỐI}{17}{chapter.6}%
-\contentsline {chapter}{\numberline {7}QUẢN LÝ CHUYỂN VÙNG VÀ BĂNG TẦN}{18}{chapter.7}%
-\contentsline {chapter}{\numberline {8}TỐI ƯU KẾT NỐI TOPOLOGY}{19}{chapter.8}%
-\contentsline {chapter}{\numberline {9}PHÂN LUỒNG DỮ LIỆU}{20}{chapter.9}%
-\contentsline {chapter}{\numberline {10}TỔNG KẾT}{21}{chapter.10}%
-\contentsline {chapter}{\numberline {A} Code Minh Họa}{22}{appendix.A}%
-\contentsline {chapter}{\numberline {B} Nhiệm Vụ Liên Quan}{23}{appendix.B}%
+\contentsline {section}{\numberline {2.1}Tổng quan Hệ thống Wi-Fi Mesh}{2}{section.2.1}%
+\contentsline {subsection}{\numberline {2.1.1}Triển khai Thực tế Hệ thống Wi-Fi Mesh của VHT}{3}{subsection.2.1.1}%
+\contentsline {section}{\numberline {2.2}Các Chức năng của Hệ thống Wi-Fi Mesh}{4}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Đồng bộ Cấu hình (Autoconfiguration)}{4}{subsection.2.2.1}%
+\contentsline {subsection}{\numberline {2.2.2}Quản lý Thiết bị (Device Management)}{5}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Chuyển vùng cho STA (Client Steering)}{6}{subsection.2.2.3}%
+\contentsline {subsubsection}{Chuyển Băng tần trên Cùng AP (Band Steering)}{6}{subsection.2.2.3}%
+\contentsline {subsubsection}{Chuyển vùng giữa các AP (Roaming)}{7}{figure.caption.12}%
+\contentsline {section}{\numberline {2.3}Một Số Vấn Đề Thực Tế Cần Lưu Ý}{8}{section.2.3}%
+\contentsline {chapter}{\numberline {3}ONBOARDING}{11}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Phương Pháp PBC (Push Button Configuration)}{11}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Phương Pháp DPP Onboarding Qua Wi-Fi}{12}{section.3.2}%
+\contentsline {section}{\numberline {3.3}DPP Onboarding Qua Ethernet (Wired)}{14}{section.3.3}%
+\contentsline {section}{\numberline {3.4}Cấu Hình Dịch Vụ Sau Onboarding}{15}{section.3.4}%
+\contentsline {chapter}{\numberline {4}ĐỒNG BỘ CẤU HÌNH}{16}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Tổng Quan}{16}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Cơ Chế Cấu Hình AP (AP Configuration)}{16}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}Cấu Hình Qua WSC (Wi-Fi Simple Configuration)}{16}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}Sơ Đồ Luồng Bản Tin WSC Configuration}{17}{subsection.4.2.2}%
+\contentsline {section}{\numberline {4.3}Cấu Hình Qua DPP (Device Provisioning Protocol)}{18}{section.4.3}%
+\contentsline {subsection}{\numberline {4.3.1}Sơ Đồ Luồng Bản Tin DPP Configuration}{18}{subsection.4.3.1}%
+\contentsline {section}{\numberline {4.4}Đồng Bộ Chính Sách Và MLO}{19}{section.4.4}%
+\contentsline {subsection}{\numberline {4.4.1}Cấu Hình Chính Sách (Policy Configuration)}{19}{subsection.4.4.1}%
+\contentsline {subsection}{\numberline {4.4.2}Cấu Hình Wi-Fi 7 --- Đa Liên Kết (MLO)}{19}{subsection.4.4.2}%
+\contentsline {section}{\numberline {4.5}Báo Cáo Trạng Thái Vận Hành}{19}{section.4.5}%
+\contentsline {section}{\numberline {4.6}Các Điểm Kỹ thuật Then Chốt}{20}{section.4.6}%
+\contentsline {chapter}{\numberline {5}QUẢN LÝ TOPOLOGY}{21}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Kiến Trúc Và Khám Phá Topology}{21}{section.5.1}%
+\contentsline {subsection}{\numberline {5.1.1}Luồng Bản Tin Khám Phá (Discovery Flow)}{21}{subsection.5.1.1}%
+\contentsline {section}{\numberline {5.2}Quản Lý Trạng Thái Thiết Bị Khách (Client Management)}{22}{section.5.2}%
+\contentsline {subsection}{\numberline {5.2.1}Luồng Bản Tin Sự Kiện Kết Nối Client}{22}{subsection.5.2.1}%
+\contentsline {section}{\numberline {5.3}Báo Cáo Topology Cho Wi-Fi 7 (MLO)}{24}{section.5.3}%
+\contentsline {section}{\numberline {5.4}Duy Trì Danh Sách Tác Nhân (Agent List)}{24}{section.5.4}%
+\contentsline {chapter}{\numberline {6}QUẢN LÝ THIẾT BỊ KẾT NỐI}{26}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Tổng Quan}{26}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Thông Báo Hiệp Hội Và Ngắt Kết Nối}{26}{section.6.2}%
+\contentsline {subsection}{\numberline {6.2.1}Luồng Bản Tin Sự Kiện Hiệp Hội Và Ngắt Kết Nối}{27}{subsection.6.2.1}%
+\contentsline {section}{\numberline {6.3}Điều Phối Thiết Bị Khách (Client Steering)}{28}{section.6.3}%
+\contentsline {subsection}{\numberline {6.3.1}Luồng Bản Tin Steering Qua BTM}{28}{subsection.6.3.1}%
+\contentsline {section}{\numberline {6.4}Truy Vấn Khả Năng Thiết Bị Khách (Capability Query)}{29}{section.6.4}%
+\contentsline {subsection}{\numberline {6.4.1}Luồng bản tin Capability Query}{29}{subsection.6.4.1}%
+\contentsline {section}{\numberline {6.5}Kiểm Soát Hiệp Hội (Association Control)}{30}{section.6.5}%
+\contentsline {section}{\numberline {6.6}Bản Tin Tunneled}{30}{section.6.6}%
+\contentsline {section}{\numberline {6.7}Các Điểm Kỹ Thuật Then Chốt}{30}{section.6.7}%
+\contentsline {chapter}{\numberline {7}CHUYỂN VÙNG VÀ BĂNG TẦN}{32}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Tổng Quan Về Client Steering}{32}{section.7.1}%
+\contentsline {section}{\numberline {7.2}Các Phương Thức Điều Phối Kết Nối}{32}{section.7.2}%
+\contentsline {subsection}{\numberline {7.2.1}Thuật Toán Chuyển Băng Tần Cao Xuống Thấp}{33}{subsection.7.2.1}%
+\contentsline {subsection}{\numberline {7.2.2}Thuật Toán Chuyển Băng Tần Thấp Lên Cao}{33}{subsection.7.2.2}%
+\contentsline {subsection}{\numberline {7.2.3}Thuật Toán Chuyển Vùng Giữa Các BSS Trong Mạng}{33}{subsection.7.2.3}%
+\contentsline {subsection}{\numberline {7.2.4}Steering Mandate (Lệnh Bắt Buộc)}{34}{subsection.7.2.4}%
+\contentsline {subsection}{\numberline {7.2.5}Steering Opportunity (Cơ Hội Điều Phối)}{34}{subsection.7.2.5}%
+\contentsline {subsection}{\numberline {7.2.6}Agent-initiated Steering (Tác Nhân Chủ Động)}{34}{subsection.7.2.6}%
+\contentsline {section}{\numberline {7.3}Sơ Đồ Luồng Bản Tin Steering}{34}{section.7.3}%
+\contentsline {subsection}{\numberline {7.3.1}Steering Qua 802.11v BTM}{34}{subsection.7.3.1}%
+\contentsline {subsection}{\numberline {7.3.2}Steering Cho Thiết Bị Legacy (Không Hỗ Trợ 802.11v)}{35}{subsection.7.3.2}%
+\contentsline {section}{\numberline {7.4}Quản Lý Chính Sách Điều Hướng (Steering Policy)}{36}{section.7.4}%
+\contentsline {section}{\numberline {7.5}Điều Hướng Backhaul (Backhaul Steering)}{36}{section.7.5}%
+\contentsline {section}{\numberline {7.6}Các Điểm Kỹ Thuật Then Chốt}{37}{section.7.6}%
+\contentsline {chapter}{\numberline {8}TỐI ƯU KẾT NỐI TOPOLOGY}{39}{chapter.8}%
+\contentsline {section}{\numberline {8.1}Tổng Quan Về Tối Ưu Hóa Backhaul}{39}{section.8.1}%
+\contentsline {section}{\numberline {8.2}Điều Hướng Backhaul (Backhaul Steering)}{39}{section.8.2}%
+\contentsline {subsection}{\numberline {8.2.1}Sơ Đồ Luồng Bản Tin Backhaul Steering}{40}{subsection.8.2.1}%
+\contentsline {section}{\numberline {8.3}Kiểm Soát Hiệp hội bSTA (Association Control)}{41}{section.8.3}%
+\contentsline {subsection}{\numberline {8.3.1}Cấu Hình Và Thực Thi Chính Sách}{41}{subsection.8.3.1}%
+\contentsline {section}{\numberline {8.4}Tối Ưu Hóa Khả Năng VLAN (Max VIDs Optimization)}{42}{section.8.4}%
+\contentsline {subsection}{\numberline {8.4.1}Phát Hiện Và Xử Lý Xung Đột Max VIDs}{42}{subsection.8.4.1}%
+\contentsline {chapter}{\numberline {9}PHÂN LUỒNG DỮ LIỆU}{44}{chapter.9}%
+\contentsline {section}{\numberline {9.1}Tổng Quan (Traffic Separation)}{44}{section.9.1}%
+\contentsline {section}{\numberline {9.2}Cấu Hình Chính Sách VLAN}{44}{section.9.2}%
+\contentsline {subsection}{\numberline {9.2.1}Báo Cáo Khả Năng Của Agent}{44}{subsection.9.2.1}%
+\contentsline {subsection}{\numberline {9.2.2}Các Bản Tin Điều Khiển Then Chốt}{45}{subsection.9.2.2}%
+\contentsline {section}{\numberline {9.3}Quy Tắc Xử Lý Gói Tin (Tagging Rules)}{45}{section.9.3}%
+\contentsline {subsection}{\numberline {9.3.1}Giao Diện Wi-Fi Fronthaul}{45}{subsection.9.3.1}%
+\contentsline {subsection}{\numberline {9.3.2}Giao Diện Wi-Fi Backhaul}{45}{subsection.9.3.2}%
+\contentsline {subsection}{\numberline {9.3.3}Giao Diện Multi-AP Logical Ethernet}{46}{subsection.9.3.3}%
+\contentsline {section}{\numberline {9.4}Sơ Đồ Luồng Bản Tin Và Dữ Liệu}{46}{section.9.4}%
+\contentsline {subsection}{\numberline {9.4.1}Luồng Bản Tin Cấu Hình Policy}{46}{subsection.9.4.1}%
+\contentsline {subsection}{\numberline {9.4.2}Luồng Dữ Liệu Thực Tế Qua Backhaul}{46}{subsection.9.4.2}%
+\contentsline {section}{\numberline {9.5}Ràng Buộc Kỹ Thuật}{47}{section.9.5}%
+\contentsline {chapter}{\numberline {10}TỔNG KẾT}{48}{chapter.10}%
+\contentsline {section}{\numberline {10.1}Kiến Trúc Và Thành Phần Hệ Thống}{48}{section.10.1}%
+\contentsline {section}{\numberline {10.2}Quy Trình Gia Nhập Mạng (Onboarding)}{48}{section.10.2}%
+\contentsline {section}{\numberline {10.3}Quản Lý Topology Và Cấu Hình}{48}{section.10.3}%
+\contentsline {section}{\numberline {10.4}Quản Lý Thiết Bị Khách Và Điều Phối (Steering)}{49}{section.10.4}%
+\contentsline {subsection}{\numberline {10.4.1}Theo Dõi Và Báo Cáo}{49}{subsection.10.4.1}%
+\contentsline {subsection}{\numberline {10.4.2}Điều Phối Kết Nối (Client Steering)}{49}{subsection.10.4.2}%
+\contentsline {section}{\numberline {10.5}Tối Ưu Hóa Và Phân Luồng Dữ liệu}{49}{section.10.5}%
+\contentsline {section}{\numberline {10.6}Giám Sát Và Đo Lường (Metrics)}{49}{section.10.6}%
+\contentsline {chapter}{\numberline {A} Nhiệm Vụ Liên Quan}{52}{appendix.A}%
 \contentsfinish 

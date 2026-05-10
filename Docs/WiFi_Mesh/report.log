@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999993 (TeX Live 2022/dev/Debian) (preloaded format=xelatex 2026.1.30)  7 MAY 2026 22:26
+This is XeTeX, Version 3.141592653-2.6-0.999993 (TeX Live 2022/dev/Debian) (preloaded format=xelatex 2026.1.30)  10 MAY 2026 17:36
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1307,6 +1307,57 @@ File: pgflibraryarrows.meta.code.tex 2021/05/15 v3.1.9a (3.1.9a)
 zlibrarypositioning.code.tex
 File: tikzlibrarypositioning.code.tex 2021/05/15 v3.1.9a (3.1.9a)
 )
+(/usr/share/texlive/texmf-dist/tex/latex/algorithm2e/algorithm2e.sty
+Invalid UTF-8 byte or sequence at line 284 replaced by U+FFFD.
+Invalid UTF-8 byte or sequence at line 299 replaced by U+FFFD.
+Invalid UTF-8 byte or sequence at line 550 replaced by U+FFFD.
+Package: algorithm2e 2017/07/18 v5.2 algorithms environments
+\c@AlgoLine=\count521
+\algocf@hangindent=\skip99
+
+(/usr/share/texlive/texmf-dist/tex/latex/ifoddpage/ifoddpage.sty
+Package: ifoddpage 2016/04/23 v1.1 Conditionals for odd/even page detection
+\c@checkoddpage=\count522
+)
+(/usr/share/texlive/texmf-dist/tex/latex/relsize/relsize.sty
+Package: relsize 2013/03/29 ver 4.1
+)
+\skiptotal=\skip100
+\skiplinenumber=\skip101
+\skiprule=\skip102
+\skiphlne=\skip103
+\skiptext=\skip104
+\skiplength=\skip105
+\algomargin=\skip106
+\skipalgocfslide=\skip107
+\algowidth=\dimen338
+\inoutsize=\dimen339
+\inoutindent=\dimen340
+\interspacetitleruled=\dimen341
+\interspacealgoruled=\dimen342
+\interspacetitleboxruled=\dimen343
+\algocf@ruledwidth=\skip108
+\algocf@inoutbox=\box89
+\algocf@inputbox=\box90
+\AlCapSkip=\skip109
+\AlCapHSkip=\skip110
+\algoskipindent=\skip111
+\algocf@nlbox=\box91
+\algocf@hangingbox=\box92
+\algocf@untilbox=\box93
+\algocf@skipuntil=\skip112
+\algocf@capbox=\box94
+\algocf@lcaptionbox=\skip113
+\algoheightruledefault=\skip114
+\algoheightrule=\skip115
+\algotitleheightruledefault=\skip116
+\algotitleheightrule=\skip117
+\c@algocfline=\count523
+\c@algocfproc=\count524
+\c@algocf=\count525
+\algocf@algoframe=\box95
+\algocf@algobox=\box96
+)
 (/usr/share/texlive/texmf-dist/tex/latex/algorithmicx/algpseudocode.sty
 Package: algpseudocode 
 
@@ -1314,70 +1365,19 @@ Package: algpseudocode
 Package: algorithmicx 2005/04/27 v1.2 Algorithmicx
 
 Document Style algorithmicx 1.2 - a greatly improved `algorithmic' style
-\c@ALG@line=\count521
-\c@ALG@rem=\count522
-\c@ALG@nested=\count523
-\ALG@tlm=\skip99
-\ALG@thistlm=\skip100
-\c@ALG@Lnr=\count524
-\c@ALG@blocknr=\count525
-\c@ALG@storecount=\count526
-\c@ALG@tmpcounter=\count527
-\ALG@tmplength=\skip101
+\c@ALG@line=\count526
+\c@ALG@rem=\count527
+\c@ALG@nested=\count528
+\ALG@tlm=\skip118
+\ALG@thistlm=\skip119
+\c@ALG@Lnr=\count529
+\c@ALG@blocknr=\count530
+\c@ALG@storecount=\count531
+\c@ALG@tmpcounter=\count532
+\ALG@tmplength=\skip120
 )
 Document Style - pseudocode environments for use with the `algorithmicx' style
-) (/usr/share/texlive/texmf-dist/tex/latex/algorithm2e/algorithm2e.sty
-Invalid UTF-8 byte or sequence at line 284 replaced by U+FFFD.
-Invalid UTF-8 byte or sequence at line 299 replaced by U+FFFD.
-Invalid UTF-8 byte or sequence at line 550 replaced by U+FFFD.
-Package: algorithm2e 2017/07/18 v5.2 algorithms environments
-\c@AlgoLine=\count528
-\algocf@hangindent=\skip102
-
-(/usr/share/texlive/texmf-dist/tex/latex/ifoddpage/ifoddpage.sty
-Package: ifoddpage 2016/04/23 v1.1 Conditionals for odd/even page detection
-\c@checkoddpage=\count529
-)
-(/usr/share/texlive/texmf-dist/tex/latex/relsize/relsize.sty
-Package: relsize 2013/03/29 ver 4.1
-)
-\skiptotal=\skip103
-\skiplinenumber=\skip104
-\skiprule=\skip105
-\skiphlne=\skip106
-\skiptext=\skip107
-\skiplength=\skip108
-\algomargin=\skip109
-\skipalgocfslide=\skip110
-\algowidth=\dimen338
-\inoutsize=\dimen339
-\inoutindent=\dimen340
-\interspacetitleruled=\dimen341
-\interspacealgoruled=\dimen342
-\interspacetitleboxruled=\dimen343
-\algocf@ruledwidth=\skip111
-\algocf@inoutbox=\box89
-\algocf@inputbox=\box90
-\AlCapSkip=\skip112
-\AlCapHSkip=\skip113
-\algoskipindent=\skip114
-\algocf@nlbox=\box91
-\algocf@hangingbox=\box92
-\algocf@untilbox=\box93
-\algocf@skipuntil=\skip115
-\algocf@capbox=\box94
-\algocf@lcaptionbox=\skip116
-\algoheightruledefault=\skip117
-\algoheightrule=\skip118
-\algotitleheightruledefault=\skip119
-\algotitleheightrule=\skip120
-\c@algocfline=\count530
-\c@algocfproc=\count531
-\c@algocf=\count532
-\algocf@algoframe=\box95
-\algocf@algobox=\box96
-)
-(/usr/share/texlive/texmf-dist/tex/latex/forest/forest.sty
+) (/usr/share/texlive/texmf-dist/tex/latex/forest/forest.sty
 Package: forest 2017/07/14 v2.1.5 Drawing (linguistic) trees
 
 (/usr/share/texlive/texmf-dist/tex/generic/pgf/frontendlayer/tikz/libraries/tik
@@ -1534,33 +1534,33 @@ Package biblatex Warning: 'babel/polyglossia' detected but 'csquotes' missing.
 (./report.aux)
 \openout1 = `report.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 45.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 48.
 LaTeX Font Info:    Trying to load font information for TS1+cmr on input line 4
-5.
+8.
  (/usr/share/texlive/texmf-dist/tex/latex/base/ts1cmr.fd
 File: ts1cmr.fd 2019/12/16 v2.5j Standard LaTeX font definitions
 )
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for TU/lmr/m/n on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 45.
-LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for TU/lmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
 Package translations Info: no dictionary file `translations-basic-dictionary-vi
-etnamese.trsl' found. on input line 45.
+etnamese.trsl' found. on input line 48.
 Package caption Info: Begin \AtBeginDocument code.
 Package caption Info: hyperref package is loaded.
 Package caption Info: listings package is loaded.
@@ -1575,7 +1575,7 @@ Package: lscape 2020/05/28 v3.02 Landscape Pages (DPC)
 Package pdflscape Info: Auto-detected driver: dvipdfm (xetex) on input line 98.
 
 )
-Package hyperref Info: Link coloring OFF on input line 45.
+Package hyperref Info: Link coloring OFF on input line 48.
 
 (/usr/share/texlive/texmf-dist/tex/latex/hyperref/nameref.sty
 Package: nameref 2021-04-02 v2.47 Cross-referencing by name of section
@@ -1588,19 +1588,19 @@ Package: gettitlestring 2019/12/15 v1.6 Cleanup title references (HO)
 )
 \c@section@level=\count563
 )
-LaTeX Info: Redefining \ref on input line 45.
-LaTeX Info: Redefining \pageref on input line 45.
-LaTeX Info: Redefining \nameref on input line 45.
+LaTeX Info: Redefining \ref on input line 48.
+LaTeX Info: Redefining \pageref on input line 48.
+LaTeX Info: Redefining \nameref on input line 48.
 
 (./report.out) (./report.out)
 \@outlinefile=\write6
 \openout6 = `report.out'.
 
-LaTeX Info: Redefining \microtypecontext on input line 45.
-Package microtype Info: Applying patch `item' on input line 45.
-Package microtype Info: Applying patch `toc' on input line 45.
-Package microtype Info: Applying patch `eqnum' on input line 45.
-Package microtype Info: Applying patch `footnote' on input line 45.
+LaTeX Info: Redefining \microtypecontext on input line 48.
+Package microtype Info: Applying patch `item' on input line 48.
+Package microtype Info: Applying patch `toc' on input line 48.
+Package microtype Info: Applying patch `eqnum' on input line 48.
+Package microtype Info: Applying patch `footnote' on input line 48.
 Package microtype Info: Character protrusion enabled (level 2).
 Package microtype Info: Using default protrusion set `alltext'.
 Package microtype Info: No adjustment of tracking.
@@ -1650,7 +1650,7 @@ Package biblatex Info: Trying to load language 'vietnamese'...
 Package biblatex Info: ... file 'vietnamese.lbx' not found.
 
 Package biblatex Warning: Language 'vietnamese' not supported.
-(biblatex)                Using dummy definitions on input line 45.
+(biblatex)                Using dummy definitions on input line 48.
 
 Package biblatex Info: XeTeX detected.
 (biblatex)             Assuming input encoding 'utf8'.
@@ -1661,8 +1661,8 @@ Package biblatex Info: Automatic encoding selection.
 Package biblatex Info: Trying to load bibliographic data...
 Package biblatex Info: ... file 'report.bbl' found.
 (./report.bbl)
-Package biblatex Info: Reference section=0 on input line 45.
-Package biblatex Info: Reference segment=0 on input line 45.
+Package biblatex Info: Reference section=0 on input line 48.
+Package biblatex Info: Reference segment=0 on input line 48.
 File: figures/cover_.jpg Graphic file (type bmp)
 <figures/cover_.jpg>
 File: figures/Logo_of_Viettel_High-Tech.svg.png Graphic file (type bmp)
@@ -1671,7 +1671,7 @@ File: figures/Logo_of_Viettel_High-Tech.svg.png Graphic file (type bmp)
 File: mt-cmr.cfg 2013/05/19 v2.2 microtype config. file: Computer Modern Roman 
 (RS)
 )
-LaTeX Font Info:    Trying to load font information for U+msa on input line 59.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 62.
 
 
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd
@@ -1680,7 +1680,7 @@ File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-msa.cfg
 File: mt-msa.cfg 2006/02/04 v1.1 microtype config. file: AMS symbols (a) (RS)
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 59.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 62.
 
 
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd
@@ -1702,24 +1702,48 @@ File: figures/Logo_of_Viettel_High-Tech.svg.png Graphic file (type bmp)
 
 ]) [2
 
-] (./report.toc)
+] (./report.toc [3
+
+]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[4])
 \tf@toc=\write7
 \openout7 = `report.toc'.
 
+ (./frontmatter/nomenclature.tex
 
-(./frontmatter/nomenclature.tex [3
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
 
-]) [4
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[5]) [6
 
 ] (./mainmatter/introduction.tex
 Chương 1.
-) (./mainmatter/chapter-2.tex [1
+) (./mainmatter/SystemSumary.tex [1
 
 
 ]
 Chương 2.
-File: mainmatter/images/EasyMeshSystemModel.png Graphic file (type bmp)
-<mainmatter/images/EasyMeshSystemModel.png>
+Package microtype Info: Loading generic protrusion settings for font family
+(microtype)             `lmtt' (encoding: TU).
+(microtype)             For optimal results, create family-specific settings.
+(microtype)             See the microtype manual for details.
+
+Overfull \hbox (14.56644pt too wide) in paragraph at lines 147--148
+ [][] 
+ []
+
 [2
 
 ]
@@ -1732,10 +1756,6 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
 
 [3]
-
-LaTeX Warning: Reference `fig:Autoconfig' on page 4 undefined on input line 37.
-
-
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 15.0434pt, for example:
@@ -1754,9 +1774,6 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
 
 [5]
-File: mainmatter/images/BandSteering.png Graphic file (type bmp)
-<mainmatter/images/BandSteering.png>
-
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 15.0434pt, for example:
@@ -1766,8 +1783,10 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
 
 [6]
-File: mainmatter/images/Roaming.png Graphic file (type bmp)
-<mainmatter/images/Roaming.png>
+Overfull \hbox (1.86813pt too wide) in paragraph at lines 573--576
+[]\TU/TimesNewRoman(0)/b/n/12 802.11v (BSS Transition Management): \TU/TimesNew
+Roman(0)/m/n/12 AP gửi khung BTM Request gợi ý STA chuyển
+ []
 
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
@@ -1777,7 +1796,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 
 (fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
 
-[7]) (./mainmatter/Onboarding.tex
+[7]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 15.0434pt, for example:
@@ -1786,7 +1805,7 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 
 (fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
 
-[8]
+[8]) (./mainmatter/Onboarding.tex
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 15.0434pt, for example:
@@ -1805,104 +1824,372 @@ Package fancyhdr Warning: \headheight is too small (12.0pt):
 (fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
 
 [10]
+Chương 3.
+[11
+
+]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
-(fancyhdr)                Make it at least 15.0434pt, for example:
-(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
 (fancyhdr)                You might also make \topmargin smaller to compensate:
 
-(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
-
-[11]
-
-Package fancyhdr Warning: \headheight is too small (12.0pt): 
-(fancyhdr)                Make it at least 15.0434pt, for example:
-(fancyhdr)                \setlength{\headheight}{15.0434pt}.
-(fancyhdr)                You might also make \topmargin smaller to compensate:
-
-(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
 
 [12]
 
 Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[13]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[14]) (./mainmatter/AutoConfiguration.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
 (fancyhdr)                Make it at least 15.0434pt, for example:
 (fancyhdr)                \setlength{\headheight}{15.0434pt}.
 (fancyhdr)                You might also make \topmargin smaller to compensate:
 
 (fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
 
-[13]
-Chương 3.
-) (./mainmatter/AutoConfiguration.tex [14
-
-]
+[15]
 Chương 4.
-) (./mainmatter/TopologyManagerment.tex [15
+[16
 
 ]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[17]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[18]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[19]) (./mainmatter/TopologyManagerment.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[20]
 Chương 5.
-) (./mainmatter/ClientManagerment.tex [16
+[21
 
 ]
+Overfull \hbox (4.89757pt too wide) in paragraph at lines 89--89
+|[]\TU/TimesNewRoman(1)/b/n/17.28 Quản Lý Trạng Thái Thiết Bị Khách (Client Man
+agement)| 
+ []
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[22]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[23]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[24]) (./mainmatter/ClientManagerment.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[25]
 Chương 6.
-) (./mainmatter/SteeringManagerment.tex [17
+[26
 
 ]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[27]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[28]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[29]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[30]) (./mainmatter/SteeringManagerment.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[31]
 Chương 7.
-) (./mainmatter/NetworkOptimization.tex [18
+[32
 
 ]
+Overfull \vbox (82.70184pt too high) has occurred while \output is active []
+
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[33]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[34]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[35]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[36]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[37]) (./mainmatter/NetworkOptimization.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[38]
 Chương 8.
-) (./mainmatter/TrafficSeparation.tex [19
+
+Overfull \hbox (20.92352pt too wide) in paragraph at lines 9--14
+\TU/TimesNewRoman(0)/m/n/12 Trong mạng EasyMesh, các Agent kết nối với nhau qua
+ liên kết Backhaul không dây (bSTA $\OMS/cmsy/m/n/12 $$ \TU/TimesNewRoman(0)/m/
+n/12 bAP).
+ []
+
+[39
 
 ]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[40]
+LaTeX Font Info:    Font shape `TU/lmtt/bx/n' in size <12> not available
+(Font)              Font shape `TU/lmtt/b/n' tried instead on input line 201.
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[41]) (./mainmatter/TrafficSeparation.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[42]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[43]
 Chương 9.
-) (./mainmatter/conclusion.tex [20
+[44
 
 ]
+Overfull \hbox (2.17828pt too wide) in paragraph at lines 114--117
+\TU/TimesNewRoman(0)/m/n/12 VLAN sẽ bị loại bỏ theo chính sách của thiết bị tiế
+p nhận phía sau (thường là router/switch
+ []
+
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[45]
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[46]) (./mainmatter/conclusion.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[47]
 Chương 10.
-)
+[48
 
-LaTeX Warning: Empty bibliography on input line 95.
+])
 
-(./appendix/appendix-a.tex [21
+LaTeX Warning: Empty bibliography on input line 98.
 
-]
+(./appendix/appendix-a.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 15.0434pt, for example:
+(fancyhdr)                \setlength{\headheight}{15.0434pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-3.0434pt}.
+
+[49] [50
+
+]) (./appendix/appendix-b.tex
+
+Package fancyhdr Warning: \headheight is too small (12.0pt): 
+(fancyhdr)                Make it at least 14.49998pt, for example:
+(fancyhdr)                \setlength{\headheight}{14.49998pt}.
+(fancyhdr)                You might also make \topmargin smaller to compensate:
+
+(fancyhdr)                \addtolength{\topmargin}{-2.49998pt}.
+
+[51]
 Phụ lục A.
-(/usr/share/texlive/texmf-dist/tex/latex/listings/lstlang1.sty
-File: lstlang1.sty 2020/03/24 1.8d listings language file
-)
-(/usr/share/texlive/texmf-dist/tex/latex/listings/lstmisc.sty
-File: lstmisc.sty 2020/03/24 1.8d (Carsten Heinz)
-)
-Package microtype Info: Loading generic protrusion settings for font family
-(microtype)             `lmtt' (encoding: TU).
-(microtype)             For optimal results, create family-specific settings.
-(microtype)             See the microtype manual for details.
-)
-(./appendix/appendix-b.tex [22
-
-]
-Phụ lục B.
-) [23
+) [52
 
 ] (./report.aux)
-
-LaTeX Warning: There were undefined references.
-
 Package rerunfilecheck Info: File `report.out' has not changed.
-(rerunfilecheck)             Checksum: 679CC3B2B9EE5A677513CC1A89A63B6B;3839.
+(rerunfilecheck)             Checksum: 573C838792EB9A5FDA89280B915AF565;22716.
 Package logreq Info: Writing requests to 'report.run.xml'.
 \openout1 = `report.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 54888 strings out of 476191
- 1221580 string characters out of 5812072
- 2044402 words of memory out of 5000000
- 74827 multiletter control sequences out of 15000+600000
- 474576 words of font info for 86 fonts, out of 8000000 for 9000
+ 55219 strings out of 476191
+ 1226744 string characters out of 5812072
+ 2041045 words of memory out of 5000000
+ 75156 multiletter control sequences out of 15000+600000
+ 477566 words of font info for 102 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 99i,11n,94p,1582b,1205s stack positions out of 5000i,500n,10000p,200000b,80000s
+ 99i,27n,94p,1582b,993s stack positions out of 5000i,500n,10000p,200000b,80000s
 
-Output written on report.pdf (29 pages).
+Output written on report.pdf (60 pages).

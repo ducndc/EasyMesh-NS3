@@ -1,2 +1,302 @@
 \chapter{TỐI ƯU KẾT NỐI TOPOLOGY}
 \label{chapter:chapter-8}
+% Yêu cầu package: \usepackage{tikz} và \usetikzlibrary{arrows.meta,shapes,positioning}
+
+% ============================================================
+\section{Tổng Quan Về Tối Ưu Hóa Backhaul}
+% ============================================================
+
+Trong mạng EasyMesh, các Agent kết nối với nhau qua liên kết Backhaul không dây
+(bSTA~$\leftrightarrow$~bAP). Chất lượng và cấu trúc của các liên kết này ảnh hưởng
+trực tiếp đến băng thông tổng thể mà mọi thiết bị người dùng có thể đạt được.
+Tối ưu hóa Backhaul là quá trình Controller \textbf{chủ động can thiệp} vào cấu trúc
+kết nối giữa các Agent nhằm ba mục tiêu:
+
+\begin{itemize}
+	\item \textbf{Cải thiện băng thông:} Di chuyển bSTA sang Parent Agent có liên kết
+	tốt hơn (tín hiệu mạnh hơn, ít nhiễu hơn, kênh ít tắc nghẽn hơn).
+	\item \textbf{Kiểm soát bảo mật:} Đảm bảo chỉ các bSTA đúng Profile mới được
+	phép kết nối vào các phân đoạn mạng bảo mật (Profile-2 Network Segments).
+	\item \textbf{Đảm bảo năng lực VLAN:} Trong cấu trúc chuỗi (Daisy Chain), đảm
+	bảo mọi Agent trung gian đủ khả năng xử lý số lượng VLAN cần thiết để
+	chuyển tiếp lưu lượng phân tách đúng cách.
+\end{itemize}
+
+Tất cả ba cơ chế trên đều được Controller điều phối tập trung --- Agent không tự quyết
+định cấu trúc Backhaul mà chỉ thực thi theo chỉ thị nhận được.
+
+
+% ============================================================
+\section{Điều Hướng Backhaul (Backhaul Steering)}
+% ============================================================
+
+Controller sử dụng \textbf{Backhaul Steering} để chỉ định bSTA của một Agent phải
+ngắt kết nối Backhaul hiện tại và di chuyển sang một Agent cha mới (New Parent bAP)
+có liên kết tốt hơn. Quy trình này thường được kích hoạt khi:
+
+\begin{itemize}
+	\item Chất lượng liên kết Backhaul hiện tại suy giảm (RCPI thấp, PER cao).
+	\item Một Agent mới gia nhập mạng và có vị trí địa lý phù hợp hơn làm Parent.
+	\item Controller phát hiện cấu trúc topo không tối ưu qua phân tích số liệu
+	Metric Reporting định kỳ.
+\end{itemize}
+
+
+% ------------------------------------------------------------
+\subsection{Sơ Đồ Luồng Bản Tin Backhaul Steering}
+% ------------------------------------------------------------
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(C)  at (0,   0) {Controller};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(A)  at (6,   0) {Agent (bSTA)};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(PA) at (11,  0) {New Parent Agent};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,  -0.4) -- (0,  -12);
+		\draw[dashed, gray!50] (6,  -0.4) -- (6,  -12);
+		\draw[dashed, gray!50] (11, -0.4) -- (11, -12);
+		
+		% Bước 1: Controller → Agent
+		\draw[->, blue, thick] (0,-1.4) -- (6,-1.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) Backhaul Steering Request};
+		\node[scale=0.6, gray, align=center] at (3,-2.1)
+		{\textit{Target BSSID (Parent mới), kênh mục tiêu, RUID của bSTA}};
+		
+		% Bước 2: Agent ngắt kết nối cũ
+		\node[draw, dashed, fill=orange!10, scale=0.7, align=center] at (6,-3.2)
+		{Ngắt kết nối Backhaul hiện tại};
+		
+		% Bước 3: Agent quét và kết nối Parent mới
+		\draw[->, dashed] (6,-4.6) -- (11,-4.6)
+		node[midway, above, scale=0.65, fill=white, inner sep=1pt]
+		{(3) Probe Request / Scan};
+		\draw[->, dashed] (6,-5.6) -- (11,-5.6)
+		node[midway, above, scale=0.65, fill=white, inner sep=1pt]
+		{(4) 802.11 (Re)Association Request [bSTA bit=1]};
+		\draw[->, dashed] (11,-6.6) -- (6,-6.6)
+		node[midway, above, scale=0.65, fill=white, inner sep=1pt]
+		{(5) 802.11 (Re)Association Response [Accept]};
+		
+		% Bước 4: Topology Notification
+		\draw[->, gray] (6,-7.8) -- (0,-7.8)
+		node[midway, above, scale=0.65, fill=white, inner sep=1pt]
+		{(6) 1905 Topology Notification [Backhaul Changed]};
+		\node[scale=0.6, gray, align=center] at (3,-8.5)
+		{\textit{Agent báo cáo ngay khi Backhaul mới được thiết lập}};
+		
+		% Bước 5: Backhaul Steering Response
+		\draw[->, blue, thick] (6,-9.7) -- (0,-9.7)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(7) Backhaul Steering Response};
+		\node[scale=0.6, gray, align=center] at (3,-10.4)
+		{\textit{Result Code: Success / Failure;}
+			\textit{BSSID đang kết nối thực tế}};
+		
+		% Bước 6 dự phòng
+		\node[draw, dashed, fill=red!8, scale=0.65, align=center] at (3,-11.4)
+		{Nếu Failure: Controller thử Target BSSID khác hoặc giữ nguyên topo hiện tại};
+	\end{tikzpicture}
+\end{center}
+
+\textbf{Giải thích luồng bản tin:}
+\begin{enumerate}
+	\item Controller gửi \textit{Backhaul Steering Request} đến Agent cần di chuyển,
+	chỉ định BSSID của Parent mới, kênh mục tiêu và RUID của radio bSTA cần
+	thực hiện chuyển vùng.
+	\item Agent ngắt liên kết Backhaul với Parent cũ, giải phóng tài nguyên radio.
+	\item bSTA phát Probe Request để quét tìm BSSID mục tiêu.
+	\item bSTA gửi (Re)Association Request với bit \texttt{bSTA=1} xác nhận đây là
+	trạm Backhaul, không phải thiết bị người dùng.
+	\item New Parent Agent chấp nhận và gửi Association Response, hoàn tất liên kết
+	Backhaul mới.
+	\item Agent gửi ngay \textit{1905 Topology Notification} để Controller cập nhật
+	bản đồ topo mạng trước khi có phản hồi chính thức.
+	\item Agent gửi \textit{Backhaul Steering Response} xác nhận kết quả: thành công
+	kèm BSSID đang kết nối, hoặc thất bại kèm mã lỗi. Nếu thất bại, Controller
+	có thể thử một Target BSSID khác hoặc giữ nguyên topo hiện tại.
+\end{enumerate}
+
+
+% ============================================================
+\section{Kiểm Soát Hiệp hội bSTA (Association Control)}
+% ============================================================
+
+Trong các mạng yêu cầu phân tách bảo mật theo Profile, Controller cần đảm bảo chỉ
+những bSTA đúng Profile mới được phép kết nối vào các Backhaul BSS tương ứng. Cơ chế
+\textbf{Association Control} cho phép Controller lập trình trực tiếp chính sách từ chối
+kết nối vào Agent, thay vì phải can thiệp thủ công từng trường hợp.
+
+
+% ------------------------------------------------------------
+\subsection{Cấu Hình Và Thực Thi Chính Sách}
+% ------------------------------------------------------------
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(C)    at (0,  0) {Controller};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(A)    at (7,  0) {Agent (bAP)};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(bSTA) at (7, -9) {bSTA (không đúng Profile)};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,  -0.4) -- (0,  -13);
+		\draw[dashed, gray!50] (7,  -0.4) -- (7,  -13);
+		\draw[dashed, gray!50] (7,  -9.4) -- (7,  -13);
+		
+		% Bước 1: Policy Config
+		\draw[->] (0,-1.4) -- (7,-1.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) Multi-AP Policy Config Request};
+		\node[scale=0.6, gray, align=center] at (3.5,-2.1)
+		{\textit{Backhaul BSS Config TLV: Profile-1 bSTA Disallowed,}
+			\textit{Profile-2 bSTA Disallowed}};
+		
+		% Bước 2: Agent Ack
+		\draw[->] (7,-3.1) -- (0,-3.1)
+		node[midway, above, scale=0.65, fill=white, inner sep=1pt]
+		{(2) 1905 Ack [trong vòng 1 giây]};
+		\node[scale=0.6, gray, align=center] at (3.5,-3.8)
+		{\textit{Agent xác nhận đã nhận và sẽ áp dụng chính sách}};
+		
+		% Hộp chính sách
+		\node[draw, dashed, fill=yellow!15, align=left, scale=0.65] at (3.5,-5.5) {
+			\textbf{Chính sách áp dụng tại Agent:} \\
+			$\bullet$ \texttt{Profile-1 bSTA Disallowed = 1}: Từ chối bSTA không gửi kèm Profile TLV \\
+			$\bullet$ \texttt{Profile-2 bSTA Disallowed = 1}: Từ chối bSTA khai báo hỗ trợ Profile-2
+		};
+		
+		% Bước 3: bSTA Association Request
+		\draw[->] (7,-7.5) -- (7,-7.5)  % dummy
+		node {};
+		\draw[->, dashed] (7,-7.3) to[out=-90, in=90]
+		node[right=2pt, scale=0.65, fill=white, inner sep=1pt]
+		{(3) Association Request [Profile không hợp lệ]} (7,-8.6);
+		
+		% Bước 4: Agent từ chối
+		\draw[->, red] (7,-10.2) to[out=90, in=-90]
+		node[right=2pt, scale=0.65, fill=white, inner sep=1pt]
+		{(4) Association Response [Reject]} (7,-11.6);
+		\node[scale=0.6, gray, align=center] at (10.5,-10.9)
+		{\textit{Agent từ chối tự động}\\
+			\textit{theo chính sách đã lập trình}};
+		
+		% Bước 5: Agent báo cáo
+		\draw[->, gray] (7,-12.5) -- (0,-12.5)
+		node[midway, above, scale=0.65, fill=white, inner sep=1pt]
+		{(5) 1905 Topology Notification [Association Failed]};
+	\end{tikzpicture}
+\end{center}
+
+\textbf{Giải thích cơ chế:}
+\begin{itemize}
+	\item \textbf{Bit \texttt{Profile-1 bSTA Disallowed}:} Khi được bật, Agent từ chối
+	mọi bSTA không gửi kèm thông tin Profile trong quá trình hiệp hội --- tức là
+	các thiết bị chỉ hỗ trợ EasyMesh Profile-1 cơ bản, không có khả năng mã hóa
+	Backhaul hay phân tách VLAN.
+	\item \textbf{Bit \texttt{Profile-2 bSTA Disallowed}:} Khi được bật, Agent từ chối
+	bSTA khai báo hỗ trợ Profile-2 --- thường dùng để bảo vệ các phân đoạn mạng
+	chỉ dành riêng cho bSTA Profile-1 (ví dụ: mạng IoT bảo mật thấp không được
+	phép truy cập Backhaul cao cấp).
+	\item \textbf{Tự động hóa:} Sau khi nhận cấu hình, Agent thực thi chính sách tự
+	động tại lớp 802.11 mà không cần Controller can thiệp từng trường hợp riêng
+	lẻ --- giảm đáng kể lưu lượng báo hiệu và độ trễ phản ứng.
+\end{itemize}
+
+
+% ============================================================
+\section{Tối Ưu Hóa Khả Năng VLAN (Max VIDs Optimization)}
+% ============================================================
+
+Khi mạng EasyMesh triển khai \textbf{Traffic Separation} (phân tách lưu lượng theo
+VLAN), mỗi Agent phải đủ khả năng xử lý đồng thời tất cả các VLAN ID (VID) của các
+nhánh con mà nó chuyển tiếp qua Backhaul. Mỗi Agent khai báo giới hạn này thông qua
+trường \textbf{Max VIDs} trong \textit{Profile-2 AP Capability TLV}.
+
+Vấn đề nảy sinh trong cấu trúc \textbf{Daisy Chain} (chuỗi Agent nối tiếp): một Agent
+trung gian phải tổng hợp và chuyển tiếp lưu lượng VLAN của \textit{tất cả} các Agent
+cấp dưới, dẫn đến số VID cần xử lý có thể vượt quá giới hạn \texttt{Max VIDs} của
+Agent đó.
+
+
+% ------------------------------------------------------------
+\subsection{Phát Hiện Và Xử Lý Xung Đột Max VIDs}
+% ------------------------------------------------------------
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% ---- Phần trên: Topology trước tối ưu ----
+		\node[font=\bfseries, scale=0.8] at (3.5, 0.3) {Trước tối ưu hóa (Daisy Chain)};
+		
+		\node[draw, fill=gray!15, minimum width=2cm, minimum height=0.6cm]
+		(C0)  at (0,   -0.8) {Controller};
+		\node[draw, fill=blue!10, minimum width=2.2cm, minimum height=0.6cm]
+		(A10) at (3.5, -0.8) {Agent 1};
+		\node[draw, fill=red!10,  minimum width=2.2cm, minimum height=0.6cm]
+		(A20) at (7,   -0.8) {Agent 2 \small(Max VIDs=2)};
+		\node[draw, fill=gray!10, minimum width=2.2cm, minimum height=0.6cm]
+		(A30) at (10.5,-0.8) {Agent 3 \small(3 VIDs)};
+		
+		\draw[->] (C0)  -- (A10);
+		\draw[->] (A10) -- (A20);
+		\draw[->] (A20) -- (A30);
+		
+		% BUG CŨ: }\\  rồi \textit{...}; nằm ngoài node
+	% SỬA: đưa \\ vào bên trong {}
+	\node[scale=0.65, red, align=center] at (7,-2.1)
+	{\textbf{Xung đột:} Agent 2 cần chuyển tiếp 3 VID của Agent 3\\
+		\textit{nhưng Max VIDs = 2 --- Traffic Separation bị lỗi!}};
+	
+	% ---- Phần dưới: Topology sau tối ưu ----
+	\node[font=\bfseries, scale=0.8] at (3.5,-3.4) {Sau tối ưu hóa (Backhaul Steering)};
+	
+	\node[draw, fill=gray!15, minimum width=2cm, minimum height=0.6cm]
+	(C1)  at (0,   -4.4) {Controller};
+	\node[draw, fill=blue!10, minimum width=2.2cm, minimum height=0.6cm]
+	(A11) at (3.5, -4.4) {Agent 1};
+	\node[draw, fill=red!10,  minimum width=2.2cm, minimum height=0.6cm]
+	(A21) at (5.5, -5.8) {Agent 2};
+	\node[draw, fill=green!10, minimum width=2.2cm, minimum height=0.6cm]
+	(A31) at (7,   -4.4) {Agent 3 \small(3 VIDs)};
+	
+	\draw[->] (C1)  -- (A11);
+	\draw[->] (A11) -- (A21);
+	\draw[->] (A11) -- (A31);
+	
+	% SỬA tương tự
+	\node[scale=0.65, green!60!black, align=center] at (5.5,-7.2)
+	{\textbf{Giải quyết:} Agent 3 kết nối trực tiếp lên Agent 1\\
+		\textit{Agent 2 chỉ còn xử lý VID của riêng nó --- không còn xung đột!}};
+\end{tikzpicture}
+\end{center}
+
+\textbf{Quy trình xử lý của Controller:}
+\begin{enumerate}
+	\item \textbf{Thu thập thông tin:} Controller đọc giá trị \texttt{Max VIDs} từ
+	\textit{Profile-2 AP Capability TLV} của từng Agent và xây dựng bản đồ topo
+	đầy đủ gồm số VID thực tế cần xử lý tại mỗi nút.
+	\item \textbf{Phát hiện xung đột:} Với mỗi Agent trung gian trong chuỗi, Controller
+	tính tổng số VID mà Agent đó phải chuyển tiếp (bao gồm cả VID của các Agent
+	cấp dưới). Nếu tổng này vượt quá \texttt{Max VIDs} của Agent, một xung đột
+	được ghi nhận.
+	\item \textbf{Tái cấu trúc topology:} Controller gửi \textit{Backhaul Steering
+		Request} để di chuyển bSTA của Agent bị xung đột (hoặc Agent con của nó) sang
+	một Parent khác có đủ năng lực VLAN, chuyển cấu trúc Daisy Chain thành cấu
+	trúc cây nông hơn (Star topology) khi cần thiết.
+	\item \textbf{Xác nhận kết quả:} Sau khi nhận \textit{Backhaul Steering Response}
+	thành công, Controller tính toán lại phân bổ VID và kiểm tra toàn bộ chuỗi
+	không còn điểm xung đột nào.
+\end{enumerate}
+
+\textbf{Lưu ý:} Tối ưu hóa Max VIDs là quy trình \textbf{chủ động} của Controller ---
+được thực hiện ngay khi phát hiện xung đột, không chờ lưu lượng thực tế bị mất gói.
+Điều này đảm bảo tính nhất quán của Traffic Separation ngay từ thời điểm Agent gia
+nhập mạng, trước khi bất kỳ dữ liệu người dùng nào được truyền qua Backhaul.

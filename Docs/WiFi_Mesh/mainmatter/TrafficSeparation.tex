@@ -1,2 +1,271 @@
 \chapter{PHÂN LUỒNG DỮ LIỆU}
 \label{chapter:chapter-10}
+% Yêu cầu package: \usepackage{tikz} và \usetikzlibrary{arrows.meta,shapes,positioning}
+
+% ============================================================
+\section{Tổng Quan (Traffic Separation)}
+% ============================================================
+
+Phân luồng dữ liệu (Traffic Separation) là cơ chế cho phép mạng Multi-AP phục vụ
+đồng thời nhiều nhóm người dùng trên cùng cơ sở hạ tầng vật lý, đảm bảo lưu lượng
+của các nhóm này được \textbf{cô lập hoàn toàn} từ đầu đến cuối --- từ thiết bị khách
+(STA), qua toàn bộ chuỗi Backhaul, đến điểm thoát ra WAN.
+
+Cơ chế hoạt động dựa trên \textbf{VLAN ID (VID)} theo chuẩn IEEE~802.1Q: mỗi SSID
+được ánh xạ tới một VID riêng biệt. Gói tin từ một SSID được Agent gán thẻ VID tương
+ứng ngay khi nhận vào, giữ nguyên thẻ đó xuyên suốt mạng Backhaul, và chỉ được gỡ
+thẻ khi đến điểm đích cuối cùng.
+
+Hai nhóm VLAN chính trong mạng Multi-AP:
+\begin{itemize}
+	\item \textbf{Primary VLAN:} Phục vụ mạng nội bộ chính (Home Network). Toàn bộ
+	lưu lượng quản lý IEEE~1905.1 và xác thực EAPOL \textit{bắt buộc} phải đi
+	trên Primary VLAN để đảm bảo kết nối điều khiển không bị gián đoạn.
+	\item \textbf{Secondary VLAN:} Phục vụ các mạng bổ sung như mạng khách (Guest
+	Network), mạng IoT, hoặc mạng doanh nghiệp riêng. Mỗi Secondary SSID được
+	gán một VID độc lập, cô lập hoàn toàn với Primary VLAN và với nhau.
+\end{itemize}
+
+
+% ============================================================
+\section{Cấu Hình Chính Sách VLAN}
+% ============================================================
+
+Controller chịu trách nhiệm thiết lập và phân phối chính sách Traffic Separation đến
+toàn bộ Agent trong mạng. Quá trình này diễn ra trong hai giai đoạn: khai báo
+khả năng của Agent, và phân phối chính sách từ Controller.
+
+
+% ------------------------------------------------------------
+\subsection{Báo Cáo Khả Năng Của Agent}
+% ------------------------------------------------------------
+
+Trước khi áp dụng chính sách, Controller cần biết mỗi Agent hỗ trợ bao nhiêu VLAN
+đồng thời. Agent khai báo giới hạn này qua trường \textbf{Max VIDs} trong bản tin
+\textbf{Profile-2 AP Capability TLV}:
+
+\begin{itemize}
+	\item \texttt{Max VIDs > 0}: Agent hỗ trợ Traffic Separation với tối đa \texttt{Max
+		VIDs} VLAN ID đồng thời. Controller chỉ phân công số VID không vượt quá giới
+	hạn này cho Agent đó.
+	\item \texttt{Max VIDs = 0}: Agent không hỗ trợ Traffic Separation. Controller sẽ
+	không gửi chính sách VLAN cho Agent này và cần điều chỉnh topo mạng để tránh
+	đưa Agent qua chuỗi Backhaul cần phân tách lưu lượng.
+\end{itemize}
+
+
+% ------------------------------------------------------------
+\subsection{Các Bản Tin Điều Khiển Then Chốt}
+% ------------------------------------------------------------
+
+Chính sách được phân phối qua bản tin \textbf{Multi-AP Policy Config Request} hoặc
+tích hợp trực tiếp trong quá trình Autoconfiguration~[7], mang hai TLV cốt lõi:
+
+\begin{itemize}
+	\item \textbf{Traffic Separation Policy TLV:} Khai báo bảng ánh xạ SSID
+	$\leftrightarrow$ VID cho toàn mạng. Mỗi mục gồm tên SSID và VID tương ứng
+	--- Agent dùng bảng này để xác định thẻ VLAN cần gán khi nhận gói tin từ
+	từng SSID.
+	\item \textbf{Default 802.1Q Settings TLV:} Xác định \textit{Primary VLAN ID} cho
+	mạng chính và giá trị \textit{PCP} (Priority Code Point) mặc định. PCP ảnh
+	hưởng đến ưu tiên xử lý gói tin tại các switch 802.1Q trên đường truyền.
+\end{itemize}
+
+
+% ============================================================
+\section{Quy Tắc Xử Lý Gói Tin (Tagging Rules)}
+% ============================================================
+
+Agent thực thi các quy tắc gán/gỡ thẻ VLAN tại từng loại giao diện để đảm bảo gói
+tin mang đúng thẻ VID khi di chuyển qua mạng Backhaul và được gỡ thẻ đúng lúc khi
+đến đích. Nguyên tắc tổng quát: \textbf{gán thẻ tại điểm vào (Ingress), giữ
+	thẻ trên Backhaul, gỡ thẻ tại điểm ra đến thiết bị đích (Egress)}.
+
+
+% ------------------------------------------------------------
+\subsection{Giao Diện Wi-Fi Fronthaul}
+% ------------------------------------------------------------
+
+\begin{itemize}
+	\item \textbf{Ingress} (nhận gói tin từ STA vào mạng):
+	\begin{itemize}
+		\item Gói tin \textit{không có thẻ} (untagged): Agent tra bảng ánh xạ SSID
+		$\leftrightarrow$ VID và gán thẻ 802.1Q với VID tương ứng trước khi
+		chuyển tiếp vào Backhaul.
+		\item Gói tin \textit{đã có thẻ} (tagged): Agent hủy gói tin ngay lập tức
+		--- thiết bị người dùng không được phép tự gán thẻ VLAN.
+	\end{itemize}
+	\item \textbf{Egress} (gửi gói tin từ mạng xuống STA):
+	Agent thiết lập mức ưu tiên WMM~UP dựa trên trường PCP của thẻ VLAN, sau đó
+	\textit{loại bỏ hoàn toàn} thẻ 802.1Q trước khi truyền khung 802.11 xuống
+	thiết bị khách --- vì thiết bị người dùng thông thường không xử lý được
+	khung VLAN-tagged.
+\end{itemize}
+
+
+% ------------------------------------------------------------
+\subsection{Giao Diện Wi-Fi Backhaul}
+% ------------------------------------------------------------
+
+\begin{itemize}
+	\item Gói tin di chuyển giữa các Agent hỗ trợ \textbf{Profile-2} sẽ
+	\textit{giữ nguyên thẻ VLAN} xuyên suốt --- đảm bảo phân luồng được duy
+	trì liên tục qua mọi bước nhảy Backhaul trong mạng Mesh.
+	\item Khi gói tin rời khỏi phân đoạn mạng Profile-2 (Egress ra ngoài vùng
+	EasyMesh), thẻ VLAN sẽ bị loại bỏ theo chính sách của thiết bị tiếp nhận
+	phía sau (thường là router/switch WAN).
+\end{itemize}
+
+
+% ------------------------------------------------------------
+\subsection{Giao Diện Multi-AP Logical Ethernet}
+% ------------------------------------------------------------
+
+\begin{itemize}
+	\item Gói tin \textit{không có thẻ} đi vào qua giao diện Ethernet: Agent tự động
+	gán \textit{Primary VLAN ID} và giá trị PCP mặc định đã được Controller cấu
+	hình, đảm bảo gói tin được xử lý đúng lớp ưu tiên.
+	\item Gói tin mang VID thuộc \textit{Secondary VLAN}: được giữ nguyên thẻ khi đi
+	qua giao diện này, không bị sửa đổi, để đảm bảo cô lập lưu lượng end-to-end
+	theo chính sách.
+\end{itemize}
+
+
+% ============================================================
+\section{Sơ Đồ Luồng Bản Tin Và Dữ Liệu}
+% ============================================================
+
+% ------------------------------------------------------------
+\subsection{Luồng Bản Tin Cấu Hình Policy}
+% ------------------------------------------------------------
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=2.8cm, minimum height=0.6cm]
+		(C) at (0, 0) {Controller};
+		\node[draw, fill=gray!15, minimum width=2.8cm, minimum height=0.6cm]
+		(A) at (8, 0) {Multi-AP Agent};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,-0.4) -- (0,-8.5);
+		\draw[dashed, gray!50] (8,-0.4) -- (8,-8.5);
+		
+		% Bước 1: Policy Config Request
+		\draw[->, blue, thick] (0,-1.4) -- (8,-1.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) Multi-AP Policy Config Request};
+		\node[draw, dashed, fill=yellow!15, align=left, scale=0.65] at (4,-3.0) {
+			\textbf{Nội dung TLV đính kèm:} \\
+			$\bullet$ Traffic Separation Policy TLV: SSID $\leftrightarrow$ VID mapping \\
+			$\bullet$ Default 802.1Q Settings TLV: Primary VID + PCP mặc định
+		};
+		
+		% Bước 2: Agent áp dụng
+		\node[draw, dashed, fill=blue!5, scale=0.7, align=center] at (8,-4.5)
+		{Áp dụng bảng\\SSID $\leftrightarrow$ VID};
+		
+		% Bước 3: Ack
+		\draw[->, thick] (8,-5.8) -- (0,-5.8)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(2) 1905 Ack [trong vòng 1 giây]};
+		\node[scale=0.6, gray, align=center] at (4,-6.5)
+		{\textit{Agent xác nhận đã nhận chính sách trước khi bắt đầu thực thi}};
+		
+		% Ghi chú thứ tự ưu tiên
+		\node[draw, dashed, fill=orange!10, scale=0.65, align=center] at (4,-7.8)
+		{Lưu ý: Cấu hình Agent xa trước, Agent gần Controller sau\\
+			để tránh mất kết nối điều khiển trong quá trình áp dụng chính sách};
+	\end{tikzpicture}
+\end{center}
+
+
+% ------------------------------------------------------------
+\subsection{Luồng Dữ Liệu Thực Tế Qua Backhaul}
+% ------------------------------------------------------------
+
+Sơ đồ mô tả hành trình của một gói tin từ thiết bị khách thuộc Secondary SSID (Guest)
+đi qua liên kết Backhaul Mesh đến Agent Gateway và ra WAN.
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=2.2cm, minimum height=0.6cm]
+		(STA) at (0,   0) {Guest Client};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(A1)  at (5.5, 0) {Agent 1 (Leaf)};
+		\node[draw, fill=gray!15, minimum width=2.8cm, minimum height=0.6cm]
+		(A2)  at (11,  0) {Agent 2 (Gateway)};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,  -0.4) -- (0,  -11);
+		\draw[dashed, gray!50] (5.5,-0.4) -- (5.5,-11);
+		\draw[dashed, gray!50] (11, -0.4) -- (11, -11);
+		
+		% Bước 1: STA → Agent 1
+		\draw[->] (0,-1.4) -- (5.5,-1.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) Gói tin 802.11 không thẻ (Guest SSID)};
+		
+		% Agent 1 xử lý
+		\node[draw, dashed, fill=blue!8, scale=0.7, align=center] at (5.5,-2.8)
+		{Tra bảng: Guest SSID $\to$ VID=20\\
+			Gán thẻ 802.1Q [VID=20, PCP=0]};
+		
+		% Bước 2: Agent 1 → Agent 2
+		\draw[->, thick, red] (5.5,-4.2) -- (11,-4.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(2) Gói tin có thẻ 802.1Q [VID=20]};
+		\node[scale=0.6, gray, align=center] at (8.25,-4.9)
+		{\textit{Thẻ VID được giữ nguyên xuyên suốt liên kết Backhaul Profile-2}};
+		
+		% Agent 2 xử lý
+		\node[draw, dashed, fill=green!8, scale=0.7, align=center] at (11,-6.2)
+		{Nhận diện VID=20 (Guest)\\
+			Chuyển tiếp ra cổng WAN tương ứng};
+		
+		% Bước 3: ra WAN
+		\draw[->, thick, dashed] (11,-7.5) -- (12.5,-7.5)
+		node[right, scale=0.65] {WAN / ISP};
+		\node[scale=0.6, gray, align=center] at (11,-8.2)
+		{\textit{Thẻ VID có thể được giữ hoặc gỡ tùy cấu hình cổng WAN}};
+		
+		% Ghi chú hướng ngược lại
+		\draw[gray!60, dashed] (-0.5,-9.2) -- (12,-9.2);
+		\node[scale=0.65, gray, anchor=west] at (-0.5,-9.6)
+		{\textit{Chiều ngược (Egress về STA): Agent 1 gỡ thẻ VID trước khi gửi khung 802.11 xuống Guest Client}};
+	\end{tikzpicture}
+\end{center}
+
+
+% ============================================================
+\section{Ràng Buộc Kỹ Thuật}
+% ============================================================
+
+Khi triển khai Traffic Separation, các ràng buộc sau phải được tuân thủ nghiêm ngặt
+để đảm bảo tính ổn định và bảo mật của mạng:
+
+\begin{itemize}
+	\item \textbf{Primary VLAN cho lưu lượng quản lý:} Toàn bộ lưu lượng quản lý
+	IEEE~1905.1 và các khung xác thực EAPOL \textit{bắt buộc} phải được truyền
+	trên Primary VLAN. Vi phạm ràng buộc này sẽ gây mất kết nối điều
+	khiển giữa Controller và Agent khi Primary VLAN bị thay đổi.
+	
+	\item \textbf{Thứ tự áp dụng chính sách --- Agent xa trước:} Khi thay đổi chính
+	sách Traffic Separation, Controller phải cấu hình cho các Agent ở xa (xa
+	Controller trong topo mạng) \textit{trước}, rồi mới đến các Agent gần
+	hơn. Nếu làm ngược lại, Agent trung gian có thể áp dụng VID mới trước
+	khi Agent hạ lưu sẵn sàng, gây ra gián đoạn kết nối điều khiển tạm thời
+	đối với các thiết bị phía sau.
+	
+	\item \textbf{Giới hạn Max VIDs:} Controller không được phân công số VID vượt quá
+	giá trị \texttt{Max VIDs} mà Agent khai báo. Trong cấu trúc Daisy Chain, số
+	VID tổng hợp tại Agent trung gian (bao gồm VID của tất cả Agent con) phải
+	luôn nằm trong giới hạn cho phép --- nếu không, Controller phải tái cấu trúc
+	topo Backhaul để giải quyết xung đột.
+	
+	\item \textbf{Hủy gói tin tagged từ STA:} Agent phải hủy ngay mọi gói tin đã mang
+	thẻ 802.1Q nhận từ thiết bị khách qua giao diện Fronthaul. Đây là biện
+	pháp bảo mật ngăn chặn các thiết bị người dùng tự ý truy cập vào VLAN khác
+	bằng cách tự gán thẻ VID.
+\end{itemize}

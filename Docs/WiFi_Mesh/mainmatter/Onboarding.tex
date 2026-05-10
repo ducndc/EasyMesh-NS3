@@ -1,2 +1,297 @@
 \chapter{ONBOARDING}
 \label{chapter:chapter-3}
+% Yêu cầu package: \usepackage{tikz} và \usetikzlibrary{arrows.meta,shapes}
+
+Onboarding trong mạng Wi-Fi EasyMesh (Multi-AP) là quá trình một Tác nhân Multi-AP (Multi-AP Agent) thiết lập kết nối lớp 2 (layer-2 connectivity) vào mạng thông qua Wi-Fi hoặc kết nối dây
+
+% ============================================================
+\section{Phương Pháp PBC (Push Button Configuration)}
+% ============================================================
+
+Phương pháp PBC là cơ chế đơn giản hóa việc kết nối thiết bị mới vào mạng Wi-Fi EasyMesh.
+Người dùng nhấn nút vật lý hoặc ảo trên cả hai thiết bị trong vòng 2 phút để kích hoạt
+quá trình xác thực. Quy trình sử dụng cơ chế mở rộng WPS (Wi-Fi Protected Setup) để trao
+đổi thông tin đăng nhập Backhaul, cho phép trạm bSTA (Backhaul Station) mới gia nhập
+mạng lưới một cách tự động và bảo mật.
+
+\textbf{Vai trò các thành phần:}
+\begin{itemize}
+	\item \textbf{Controller:} Thiết bị trung tâm điều phối toàn bộ mạng EasyMesh; phát
+	lệnh kích hoạt Backhaul BSS trên các Agent.
+	\item \textbf{Existing Agent (EA):} Tác nhân đã có mặt trong mạng, đóng vai trò
+	\textit{WPS Registrar} --- cấp phát thông tin đăng nhập.
+	\item \textbf{Enrollee Agent (EN):} Tác nhân mới cần gia nhập mạng, đóng vai trò
+	\textit{WPS Enrollee} --- yêu cầu và nhận thông tin đăng nhập.
+\end{itemize}
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề các thành phần ---
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(C)  at (0,   0) {Controller};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(EA) at (5.5, 0) {Existing Agent};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(EN) at (11,  0) {Enrollee Agent};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,   -0.4) -- (0,   -10);
+		\draw[dashed, gray!50] (5.5, -0.4) -- (5.5, -10);
+		\draw[dashed, gray!50] (11,  -0.4) -- (11,  -10);
+		
+		% --- Bước 1: Controller kích hoạt bBSS trên EA ---
+		\draw[->] (0,-1.2) -- (5.5,-1.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) AP-Autoconfig [Enable bBSS]};
+		
+		% --- Bước 2: Người dùng nhấn nút PBC ---
+		\draw[<->, dashed, thick] (5.5,-2.4) -- (11,-2.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(2) Người dùng nhấn nút PBC};
+		
+		% --- Bước 3 & 4: Association ---
+		\draw[->] (11,-3.6) -- (5.5,-3.6)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(3) Assoc Req\ \ [bSTA bit = 1]};
+		\draw[->] (5.5,-4.6) -- (11,-4.6)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(4) Assoc Resp [fBSS bit = 1]};
+		
+		% --- Bước 5 & 6: WPS M1/M8 ---
+		\draw[->] (11,-5.8) -- (5.5,-5.8)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(5) WSC M1 [bSTA bit = 1]};
+		\draw[->] (5.5,-6.8) -- (11,-6.8)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(6) WSC M8 [Backhaul Credentials]};
+		
+		% --- Bước 7 & 8: AP-Autoconfig với Controller ---
+		\draw[->, blue] (11,-8.2) -- (0,-8.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(7) 1905 AP-Autoconfig Search};
+		\draw[->, blue] (0,-9.2) -- (11,-9.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(8) 1905 AP-Autoconfig Response};
+	\end{tikzpicture}
+\end{center}
+
+\textbf{Giải thích luồng bản tin:}
+\begin{enumerate}
+	\item Controller gửi \textit{AP-Autoconfig} để kích hoạt Backhaul BSS (bBSS) trên EA,
+	chuẩn bị nhận kết nối từ Enrollee.
+	\item Người dùng nhấn nút PBC trên cả EA và EN đồng thời (trong vòng 2 phút).
+	\item EN gửi \textit{Association Request} với bit \texttt{bSTA=1}, báo hiệu đây là
+	trạm Backhaul muốn liên kết.
+	\item EA chấp nhận và phản hồi \textit{Association Response} với bit \texttt{fBSS=1},
+	xác nhận đây là Fronthaul/Backhaul BSS.
+	\item EN khởi tạo trao đổi WPS bằng bản tin \textit{M1}, khai báo năng lực và
+	vai trò là bSTA.
+	\item EA trả về \textit{M8} chứa thông tin đăng nhập Backhaul (SSID, passphrase,
+	AKM suite).
+	\item Sau khi có thông tin đăng nhập, EN tìm kiếm Controller trong mạng 1905 bằng
+	\textit{AP-Autoconfig Search}.
+	\item Controller phản hồi, hoàn tất quá trình EN gia nhập mạng EasyMesh.
+\end{enumerate}
+
+
+% ============================================================
+\section{Phương Pháp DPP Onboarding Qua Wi-Fi}
+% ============================================================
+
+DPP (Device Provisioning Protocol) là giao thức cấp phép thiết bị thế hệ mới, bảo mật hơn
+WPS nhờ sử dụng mật mã đường cong elliptic (ECC). Trong trường hợp Enrollee chưa có bất
+kỳ kết nối mạng nào, quy trình sử dụng \textbf{Proxy Agent} --- một tác nhân đã ở trong
+mạng EasyMesh --- để chuyển tiếp các bản tin DPP giữa Enrollee và Controller qua giao
+thức IEEE 1905.1.
+
+\textbf{Vai trò các thành phần:}
+\begin{itemize}
+	\item \textbf{Controller:} Đóng vai trò \textit{DPP Configurator} --- tạo và cấp phát
+	cấu hình mạng cho Enrollee.
+	\item \textbf{Proxy Agent:} Đã ở trong mạng; làm cầu nối, đóng gói bản tin DPP vào
+	khung 1905.1 (\textit{Proxied Encap DPP}) để chuyển tiếp tới Controller.
+	\item \textbf{Enrollee:} Thiết bị mới chưa có cấu hình mạng; phát tín hiệu
+	\textit{Chirp} để được Proxy phát hiện và hỗ trợ.
+\end{itemize}
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(C) at (0,   0) {Controller};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(P) at (5.5, 0) {Proxy Agent};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(EN) at (11, 0) {Enrollee};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,   -0.4) -- (0,   -12);
+		\draw[dashed, gray!50] (5.5, -0.4) -- (5.5, -12);
+		\draw[dashed, gray!50] (11,  -0.4) -- (11,  -12);
+		
+		% --- Bước 1 & 2: Enrollee phát hiện Proxy ---
+		\draw[->] (11,-1.2) -- (5.5,-1.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) DPP Presence Announcement};
+		\draw[->] (5.5,-2.2) -- (0,-2.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(2) Chirp Notification [1905]};
+		
+		% --- Bước 3--6: DPP Authentication ---
+		\draw[->] (0,-3.6) -- (5.5,-3.6)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(3) Proxied Encap DPP [Auth Req]};
+		\draw[->] (5.5,-4.6) -- (11,-4.6)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(4) DPP Auth Request};
+		\draw[->] (11,-5.6) -- (5.5,-5.6)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(5) DPP Auth Response};
+		\draw[->] (5.5,-6.6) -- (0,-6.6)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(6) Proxied Encap DPP [Auth Resp]};
+		
+		% --- Bước 7 & 8: DPP Configuration ---
+		\draw[->] (0,-8.0) -- (5.5,-8.0)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(7) Proxied Encap DPP [Config Resp]};
+		\draw[->] (5.5,-9.0) -- (11,-9.0)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(8) DPP Config Object [1905 / bSTA]};
+		
+		% --- Bước 9: Thiết lập kênh bảo mật ---
+		\draw[<->, thick, red] (0,-10.8) -- (11,-10.8)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(9) 1905 4-way Handshake [Secure Channel]};
+	\end{tikzpicture}
+\end{center}
+
+\textbf{Giải thích luồng bản tin:}
+\begin{enumerate}
+	\item Enrollee phát bản tin \textit{DPP Presence Announcement} trên kênh Wi-Fi để
+	thông báo sự hiện diện và sẵn sàng nhận cấu hình.
+	\item Proxy Agent nghe thấy tín hiệu, đóng gói thành \textit{Chirp Notification} và
+	chuyển tiếp đến Controller qua 1905.1.
+	\item Controller khởi tạo xác thực DPP; gửi \textit{Auth Request} được đóng gói
+	trong \textit{Proxied Encap DPP} đến Proxy.
+	\item Proxy giải gói và chuyển tiếp \textit{DPP Auth Request} trực tiếp đến Enrollee
+	qua Wi-Fi.
+	\item Enrollee phản hồi bằng \textit{DPP Auth Response}; Proxy nhận và đóng gói lại
+	để gửi về Controller.
+	\item Controller xác nhận hoàn tất xác thực hai chiều dựa trên khóa công khai ECC.
+	\item Controller tạo và gửi \textit{DPP Config Response} chứa thông tin mạng (SSID,
+	passphrase, AKM).
+	\item Proxy chuyển tiếp \textit{DPP Config Object} đến Enrollee; đối tượng này bao
+	gồm cấu hình cho giao thức 1905.1 và kết nối Backhaul (bSTA).
+	\item Enrollee và Controller thực hiện \textit{1905 4-way Handshake} để thiết lập
+	kênh truyền thông bảo mật (tô đỏ để nhấn mạnh tầm quan trọng).
+\end{enumerate}
+
+
+% ============================================================
+\section{DPP Onboarding Qua Ethernet (Wired)}
+% ============================================================
+
+Khi Enrollee Agent được kết nối trực tiếp bằng cáp Ethernet đến cùng phân đoạn mạng với
+Controller, toàn bộ quy trình DPP được thực hiện \textbf{trực tiếp} mà không cần Proxy
+trung gian. Giao thức 1905.1 được sử dụng để truyền tải bản tin DPP qua liên kết có dây
+(\textit{Direct Encap DPP}), đảm bảo độ tin cậy và tốc độ cao hơn so với qua Wi-Fi.
+
+\textbf{Vai trò các thành phần:}
+\begin{itemize}
+	\item \textbf{Controller/Configurator:} Khởi tạo toàn bộ quy trình xác thực và cấp
+	phát cấu hình trực tiếp qua Ethernet, không cần thông qua trung gian.
+	\item \textbf{Enrollee Agent:} Thiết bị mới được phát hiện ngay khi kết nối Ethernet,
+	thực hiện DPP và nhận cấu hình qua giao diện có dây.
+\end{itemize}
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=3.2cm, minimum height=0.6cm]
+		(C)  at (0, 0) {Controller / Configurator};
+		\node[draw, fill=gray!15, minimum width=2.5cm, minimum height=0.6cm]
+		(EN) at (8, 0) {Enrollee Agent};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,-0.4) -- (0,-11);
+		\draw[dashed, gray!50] (8,-0.4) -- (8,-11);
+		
+		% --- Sự kiện: Ethernet Link UP ---
+		\node[draw, dashed, fill=yellow!25, scale=0.75] at (8,-1.0)
+		{Ethernet Link UP};
+		
+		% --- Bước 1 & 2: Discovery ---
+		\draw[->] (8,-2.0) -- (0,-2.0)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) AP-Autoconfig Search [DPP Chirp TLV]};
+		\draw[->] (0,-3.0) -- (8,-3.0)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(2) AP-Autoconfig Response [DPP Chirp TLV]};
+		
+		% --- Bước 3 & 4: Authentication ---
+		\draw[->, blue] (0,-4.4) -- (8,-4.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(3) Direct Encap DPP [Auth Request]};
+		\draw[->] (8,-5.4) -- (0,-5.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(4) Direct Encap DPP [Auth Response]};
+		
+		% --- Bước 5 & 6: Configuration ---
+		\draw[->, blue] (0,-6.8) -- (8,-6.8)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(5) Direct Encap DPP [Config Response]};
+		\draw[->] (8,-7.8) -- (0,-7.8)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(6) Direct Encap DPP [Config Result]};
+		
+		% --- Bước 7: BSS Configuration ---
+		\draw[<->] (0,-9.2) -- (8,-9.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(7) BSS Configuration Request / Response};
+	\end{tikzpicture}
+\end{center}
+
+\textbf{Giải thích luồng bản tin:}
+\begin{enumerate}
+	\item Ngay khi Ethernet kết nối, Enrollee phát \textit{AP-Autoconfig Search} kèm
+	\textit{DPP Chirp TLV} để thông báo hỗ trợ DPP và khả năng nhận cấu hình.
+	\item Controller phản hồi bằng \textit{AP-Autoconfig Response} cũng mang
+	\textit{DPP Chirp TLV}, xác nhận sẵn sàng thực hiện DPP Onboarding.
+	\item Controller gửi \textit{DPP Auth Request} trực tiếp qua 1905.1 để khởi tạo
+	xác thực (không qua Proxy).
+	\item Enrollee xác minh danh tính Controller bằng khóa công khai và phản hồi
+	\textit{DPP Auth Response}, hoàn tất bắt tay xác thực hai chiều.
+	\item Controller gửi \textit{DPP Config Response} chứa toàn bộ cấu hình mạng
+	(thông tin BSS, AKM suites, thông tin 1905).
+	\item Enrollee áp dụng cấu hình nhận được và gửi \textit{DPP Config Result} xác nhận
+	thành công.
+	\item Hai bên trao đổi \textit{BSS Configuration Request/Response} để thiết lập
+	chi tiết các điểm truy cập (BSS) mà Enrollee sẽ phát sóng.
+\end{enumerate}
+
+
+% ============================================================
+\section{Cấu Hình Dịch Vụ Sau Onboarding}
+% ============================================================
+
+Sau khi hoàn tất bảo mật lớp 1905 --- thông qua PBC hoặc DPP --- Enrollee đã được xác
+thực và gia nhập mạng EasyMesh về mặt kết nối. Tuy nhiên, để hoạt động đầy đủ vai trò
+là một Agent, thiết bị cần nhận cấu hình chi tiết về các dịch vụ Wi-Fi sẽ cung cấp.
+Giai đoạn này bao gồm ba bước chính:
+
+\begin{itemize}
+	\item \textbf{BSS Configuration Request:} Enrollee báo cáo khả năng phần cứng của
+	từng radio lên Controller, bao gồm băng tần hỗ trợ (2.4\,GHz / 5\,GHz / 6\,GHz),
+	chuẩn Wi-Fi (802.11ax, \ldots), số luồng không gian (spatial streams) và các chế
+	độ hoạt động.
+	\item \textbf{BSS Configuration Response:} Dựa trên thông tin nhận được, Controller
+	cấp phát cho Enrollee danh sách đầy đủ các mạng cần phát sóng, bao gồm SSID,
+	BSSID được chỉ định và các bộ suite xác thực
+	(AKM --- \textit{Authentication and Key Management}) tương ứng với từng SSID
+	(ví dụ: WPA3-SAE, WPA2-PSK).
+	\item \textbf{Agent List:} Controller cập nhật cho Enrollee danh sách toàn bộ các
+	Tác nhân (Agent) hiện có trong mạng. Thông tin này giúp Enrollee xây dựng bản
+	đồ topo mạng, tối ưu hóa việc chọn đường liên kết Backhaul và phối hợp chuyển
+	vùng liền mạch (\textit{seamless roaming}) cho các thiết bị người dùng.
+\end{itemize}

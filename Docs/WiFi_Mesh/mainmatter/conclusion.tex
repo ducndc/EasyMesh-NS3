@@ -1,4 +1,51 @@
 \chapter{TỔNG KẾT}
 \label{chapter:conclusion}
 
-\emph{A conclusion...}
+\section{Kiến Trúc Và Thành Phần Hệ Thống}
+Hệ thống Multi-AP được xây dựng trên hai thực thể logic chính để quản lý và vận hành mạng lưới lưới (mesh):
+\begin{itemize}
+	\item \textbf{Bộ điều khiển (Multi-AP Controller):} Thực thể duy nhất trong mạng chịu trách nhiệm điều phối, quản lý chính sách và thực hiện việc gia nhập mạng cho các thiết bị mới.
+	\item \textbf{Tác nhân (Multi-AP Agent):} Thực thi các lệnh từ Bộ điều khiển, báo cáo dữ liệu đo lường và quản lý trực tiếp các điểm truy cập (\textit{Fronthaul AP}) và liên kết Mesh (\textit{Backhaul}).
+	\item \textbf{Cấu trúc liên kết:} Các thiết bị được tổ chức theo \textbf{cấu trúc hình cây (Tree Topology)}, đảm bảo chỉ có một đường dẫn duy nhất giữa hai điểm bất kỳ.
+\end{itemize}
+
+\section{Quy Trình Gia Nhập Mạng (Onboarding)}
+Quá trình này thiết lập kết nối lớp 2 và kênh điều khiển bảo mật:
+\begin{itemize}
+	\item \textbf{Phương thức PBC:} Sử dụng nút bấm (vật lý hoặc logic) và mở rộng bản tin \texttt{WSC M1} (đặt bit 7 để chỉ định \textit{backhaul STA}) để nhận SSID/mật khẩu.
+	\item \textbf{Phương thức DPP (EasyConnect):} Sử dụng mã QR để xác thực. Các bản tin DPP được đóng gói (\textit{Encapsulated}) và chuyển tiếp qua một \textbf{Proxy Agent} nếu thiết bị mới chưa có kết nối.
+	\item \textbf{Kết nối dây (Ethernet):} Tự động kích hoạt khi phát hiện link Ethernet chuyển sang trạng thái \texttt{LINK\_UP}.
+\end{itemize}
+
+\section{Quản Lý Topology Và Cấu Hình}
+\begin{itemize}
+	\item \textbf{Khám phá dịch vụ:} Sử dụng các bản tin \texttt{AP-Autoconfiguration Search/Response} mở rộng để xác định vai trò và phiên bản Profile (Profile-1/2/3) của thiết bị.
+	\item \textbf{Đồng bộ cấu hình:} Bộ điều khiển thiết lập thông số BSS qua bản tin \texttt{WSC M2} hoặc đối tượng JSON trong DPP.
+	\item \textbf{Báo cáo vận hành:} Tác nhân báo cáo danh sách BSS thực tế (\texttt{AP Operational BSS TLV}) và danh sách thiết bị khách (\texttt{Associated Clients TLV}) để cập nhật sơ đồ mạng.
+\end{itemize}
+
+\section{Quản Lý Thiết Bị Khách Và Điều Phối (Steering)}
+\subsection{Theo Dõi Và Báo Cáo}
+Tác nhân thực hiện thông báo nhanh (\textit{Fast Notification}) khi thiết bị khách gia nhập hoặc rời mạng để cập nhật bảng định tuyến toàn hệ thống [9, 15]. Các thống kê lưu lượng và lý do ngắt kết nối được báo cáo qua bản tin \texttt{Client Disassociation Stats}.
+
+\subsection{Điều Phối Kết Nối (Client Steering)}
+Cơ chế giúp tối ưu hóa tải và vùng phủ bằng cách di chuyển thiết bị khách:
+\begin{itemize}
+	\item \textbf{Cơ chế 802.11v BTM:} Gửi yêu cầu chuyển vùng kèm danh sách BSS mục tiêu.
+	\item \textbf{Kiểm soát hiệp hội:} Chặn các thiết bị không tuân thủ lệnh điều hướng tại các AP không mong muốn.
+	\item \textbf{Chính sách (Policy):} Bộ điều khiển thiết lập ngưỡng RCPI và tải kênh để Tác nhân tự động điều phối.
+\end{itemize}
+
+\section{Tối Ưu Hóa Và Phân Luồng Dữ liệu}
+\begin{itemize}
+	\item \textbf{Tối ưu hóa Backhaul:} Bộ điều khiển có thể điều hướng trạm Backhaul (\textit{bSTA}) của một node Mesh sang một node cha khác có tín hiệu tốt hơn (\texttt{Backhaul Steering Request}).
+	\item \textbf{Phân luồng lưu lượng (Traffic Separation):} Sử dụng thẻ \textbf{IEEE 802.1Q VLAN} để cô lập dữ liệu giữa các SSID (vd: mạng nội bộ và mạng khách) xuyên suốt mạng Mesh.
+\end{itemize}
+
+\section{Giám Sát Và Đo Lường (Metrics)}
+Bộ điều khiển thu thập dữ liệu hiệu suất để đưa ra quyết định quản lý mạng:
+\begin{itemize}
+	\item \textbf{AP Metrics Query:} Truy vấn thông số theo danh sách BSSID và RUID cụ thể.
+	\item \textbf{Dữ liệu báo cáo:} Bao gồm độ bận của kênh (\textit{Channel Utilization}), nhiễu (\textit{Noise}), và thống kê lưu lượng chi tiết của từng thiết bị khách.
+\end{itemize}
+

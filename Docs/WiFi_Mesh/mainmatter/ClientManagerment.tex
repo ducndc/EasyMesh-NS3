@@ -1,2 +1,397 @@
 \chapter{QUẢN LÝ THIẾT BỊ KẾT NỐI}
 \label{chapter:chapter-6}
+% Yêu cầu package: \usepackage{tikz} và \usetikzlibrary{arrows.meta,shapes,positioning}
+
+% ============================================================
+\section{Tổng Quan}
+% ============================================================
+
+Quản lý thiết bị kết nối (Client Management) là tập hợp các cơ chế cho phép
+\textbf{Controller} duy trì tầm nhìn toàn diện và kiểm soát tập trung đối với mọi
+thiết bị khách (STA) trong mạng Multi-AP~[1, 2]. Thay vì mỗi Agent tự đưa ra quyết
+định độc lập, mô hình tập trung này cho phép Controller phân tích toàn cục và điều
+phối hợp lý hơn.
+
+Hệ thống Client Management bao gồm bốn nhóm chức năng chính:
+\begin{itemize}
+	\item \textbf{Thông báo trạng thái (Event Notification):} Agent báo cáo tức thì
+	mỗi khi có STA gia nhập hoặc rời mạng, giúp Controller cập nhật bảng định
+	tuyến theo thời gian thực~[3].
+	\item \textbf{Truy vấn khả năng (Capability Query):} Controller thu thập thông tin
+	kỹ thuật chi tiết về các chuẩn Wi-Fi mà mỗi STA hỗ trợ để đưa ra quyết định
+	điều phối phù hợp~[7, 8].
+	\item \textbf{Điều phối chuyển vùng (Client Steering):} Controller ra lệnh hoặc
+	gợi ý Agent hướng STA sang một BSS có chất lượng tín hiệu tốt hơn thông qua
+	khung BTM hoặc ngắt kết nối chủ động~[2, 5, 6].
+	\item \textbf{Kiểm soát hiệp hội (Association Control):} Controller chặn hoặc cho
+	phép STA cụ thể kết nối vào từng BSS, phục vụ cân bằng tải và bảo mật~[9, 10].
+\end{itemize}
+
+Tất cả các chức năng trên đều được thực hiện qua các bản tin 1905.1 mở rộng, đảm bảo
+Controller luôn có cái nhìn nhất quán về toàn bộ mạng~[3].
+
+
+% ============================================================
+\section{Thông Báo Hiệp Hội Và Ngắt Kết Nối}
+% ============================================================
+
+Mỗi khi trạng thái kết nối của một STA thay đổi, Agent quản lý BSS đó ngay lập tức
+gửi bản tin thông báo đến Controller theo cơ chế \textbf{Fast Notification} --- không
+chờ chu kỳ báo cáo định kỳ. Nhờ vậy, Controller luôn cập nhật được vị trí thực tế
+của từng client trong mạng, là dữ liệu đầu vào quan trọng cho các quyết định
+điều phối~[3].
+
+
+% ------------------------------------------------------------
+\subsection{Luồng Bản Tin Sự Kiện Hiệp Hội Và Ngắt Kết Nối}
+% ------------------------------------------------------------
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=2.2cm, minimum height=0.6cm]
+		(STA) at (0,   0) {Client (STA)};
+		\node[draw, fill=gray!15, minimum width=2.2cm, minimum height=0.6cm]
+		(A)   at (5.5, 0) {Agent};
+		\node[draw, fill=gray!15, minimum width=2.8cm, minimum height=0.6cm]
+		(C)   at (11,  0) {Controller};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,   -0.4) -- (0,   -13);
+		\draw[dashed, gray!50] (5.5, -0.4) -- (5.5, -13);
+		\draw[dashed, gray!50] (11,  -0.4) -- (11,  -13);
+		
+		% ---- Pha 1: Association ----
+		\node[scale=0.72, font=\bfseries, anchor=west] at (-0.5,-1.0)
+		{Sự kiện: STA gia nhập mạng};
+		\draw[gray!60] (-0.5,-1.35) -- (12,-1.35);
+		
+		% Bước 1: STA → Agent
+		\draw[->, dashed] (0,-2.2) -- (5.5,-2.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) 802.11 (Re)Association Request};
+		\node[scale=0.6, gray, align=center] at (2.75,-2.9)
+		{\textit{STA hoàn tất bắt tay 802.11 và 4-way Handshake với Agent}};
+		
+		% Bước 2: Agent → Controller
+		\draw[->, blue] (5.5,-3.9) -- (11,-3.9)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(2) 1905 Topology Notification};
+		\node[scale=0.6, gray, align=center] at (8.25,-4.6)
+		{\textit{Chứa Client Association Event TLV:}
+			\textit{MAC STA, BSSID, thời điểm hiệp hội}};
+		
+		% Bước 3: Controller broadcast
+		\draw[->, blue, dashed] (11,-5.6) -- (5.5,-5.6)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(3) Broadcast Update \textrightarrow{} All Agents};
+		\node[scale=0.6, gray, align=center] at (8.25,-6.3)
+		{\textit{Controller đồng bộ vị trí STA mới tới toàn bộ mạng}};
+		
+		% ---- Pha 2: Disassociation ----
+		\node[scale=0.72, font=\bfseries, anchor=west] at (-0.5,-7.3)
+		{Sự kiện: STA rời mạng};
+		\draw[gray!60] (-0.5,-7.65) -- (12,-7.65);
+		
+		% Bước 4: STA → Agent
+		\draw[->, dashed] (0,-8.5) -- (5.5,-8.5)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(4) 802.11 Disassociation / Timeout};
+		
+		% Bước 5: Agent → Controller (Topology Notification)
+		\draw[->, red] (5.5,-9.6) -- (11,-9.6)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(5) 1905 Topology Notification [Client Leave]};
+		
+		% Bước 6: Agent → Controller (Disassociation Stats)
+		\draw[->, red] (5.5,-10.8) -- (11,-10.8)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(6) Client Disassociation Stats TLV};
+		\node[scale=0.6, gray, align=center] at (8.25,-11.5)
+		{\textit{Lý do ngắt kết nối, thời lượng phiên,}
+			\textit{tổng byte/gói tin đã truyền nhận}};
+		
+		% Bước 7: Controller broadcast
+		\draw[->, red, dashed] (11,-12.3) -- (5.5,-12.3)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(7) Broadcast Update \textrightarrow{} All Agents};
+	\end{tikzpicture}
+\end{center}
+
+\textbf{Giải thích luồng bản tin:}
+\begin{enumerate}
+	\item STA hoàn tất thủ tục 802.11 (Re)Association và 4-way Handshake với Agent,
+	thiết lập kết nối Wi-Fi ở lớp vật lý và lớp bảo mật.
+	\item Agent ngay lập tức gửi \textit{1905 Topology Notification} đến Controller,
+	kèm \textit{Client Association Event TLV} mang địa chỉ MAC của STA, BSSID
+	đang phục vụ và thời điểm hiệp hội.
+	\item Controller cập nhật bảng định tuyến và phát quảng bá thông tin này đến
+	tất cả Agent còn lại để đồng bộ trạng thái toàn mạng.
+	\item STA gửi khung \textit{Disassociation} hoặc bị Agent ngắt kết nối do hết
+	thời gian chờ (idle timeout).
+	\item Agent gửi \textit{1905 Topology Notification} thông báo STA đã rời mạng,
+	kèm lý do ngắt kết nối (reason code theo chuẩn 802.11).
+	\item Agent gửi thêm \textit{Client Disassociation Stats TLV} cung cấp số liệu
+	phiên: thời lượng kết nối, tổng lưu lượng truyền/nhận và mức tín hiệu
+	trung bình --- dữ liệu này giúp Controller phân tích chất lượng vùng phủ
+	và cải thiện chính sách điều phối~[4].
+	\item Controller phát quảng bá cập nhật đến toàn mạng, xóa STA khỏi bảng
+	định tuyến tại mọi Agent.
+\end{enumerate}
+
+
+% ============================================================
+\section{Điều Phối Thiết Bị Khách (Client Steering)}
+% ============================================================
+
+Client Steering là cơ chế cho phép Controller hướng một STA rời khỏi BSS hiện tại và
+kết nối vào một BSS mục tiêu có chất lượng tín hiệu hoặc tải mạng tốt hơn~[2]. Có hai
+chế độ hoạt động:
+
+\begin{itemize}
+	\item \textbf{Steering Mandate} (\textit{Bắt buộc}): Controller yêu cầu Agent thực
+	hiện ngay lập tức. Agent dùng BTM Request hoặc ngắt kết nối chủ động để buộc
+	STA chuyển vùng trong khoảng thời gian cho phép~[2, 6].
+	\item \textbf{Steering Opportunity} (\textit{Tự quyết}): Controller cấp cho Agent
+	một khoảng thời gian để tự đánh giá và thực hiện điều phối phù hợp với điều
+	kiện RF thực tế, không bắt buộc chuyển vùng ngay~[2, 6].
+\end{itemize}
+
+Ngoài ra, Agent có thể \textbf{chủ động} thực hiện điều phối mà không cần lệnh từ
+Controller, khi mức RCPI (\textit{Received Channel Power Indicator}) của STA xuống
+dưới ngưỡng được định nghĩa trong \textit{Steering Policy TLV} mà Controller đã
+phân phối trước đó.
+
+
+% ------------------------------------------------------------
+\subsection{Luồng Bản Tin Steering Qua BTM}
+% ------------------------------------------------------------
+
+Quy trình sử dụng khung \textbf{BSS Transition Management (BTM)} theo chuẩn IEEE
+802.11v để yêu cầu STA chủ động chuyển vùng --- ít gây gián đoạn hơn so với việc
+ngắt kết nối cưỡng bức~[5].
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=2.8cm, minimum height=0.6cm]
+		(C)   at (0,   0) {Controller};
+		\node[draw, fill=gray!15, minimum width=2.2cm, minimum height=0.6cm]
+		(A)   at (6,   0) {Agent};
+		\node[draw, fill=gray!15, minimum width=2.2cm, minimum height=0.6cm]
+		(STA) at (11,  0) {Client (STA)};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,  -0.4) -- (0,  -10.5);
+		\draw[dashed, gray!50] (6,  -0.4) -- (6,  -10.5);
+		\draw[dashed, gray!50] (11, -0.4) -- (11, -10.5);
+		
+		% Bước 1: Controller → Agent
+		\draw[->, orange] (0,-1.4) -- (6,-1.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) Client Steering Request};
+		\node[scale=0.6, gray, align=center] at (3,-2.1)
+		{\textit{Chứa: MAC STA, BSSID mục tiêu, chế độ (Mandate/Opportunity),}
+			\textit{thời gian cho phép (Steering Window)}};
+		
+		% Bước 2: Agent → STA
+		\draw[->, dashed] (6,-3.2) -- (11,-3.2)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(2) 802.11 BTM Request};
+		\node[scale=0.6, gray, align=center] at (8.5,-3.9)
+		{\textit{Danh sách BSS ứng viên (Neighbor Report),}
+			\textit{mức ưu tiên và thời gian hợp lệ}};
+		
+		% Bước 3: STA → Agent
+		\draw[->, dashed] (11,-5.0) -- (6,-5.0)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(3) 802.11 BTM Response};
+		\node[scale=0.6, gray, align=center] at (8.5,-5.7)
+		{\textit{Status Code: Accept / Reject (kèm lý do từ chối)}};
+		
+		% Bước 4: STA chuyển vùng (nếu chấp nhận)
+		\draw[->, dashed, gray] (11,-6.6) -- (6,-6.6)
+		node[midway, above, scale=0.65, fill=white, inner sep=1pt]
+		{(4) 802.11 (Re)Association tới BSS mục tiêu};
+		
+		% Bước 5: Agent → Controller (BTM Report)
+		\draw[->, blue] (6,-7.9) -- (0,-7.9)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(5) Client Steering BTM Report};
+		\node[scale=0.6, gray, align=center] at (3,-8.6)
+		{\textit{Status Code phản hồi từ STA;}
+			\textit{cho biết chuyển vùng thành công hay thất bại}};
+		
+		% Bước 6 (nếu thất bại): Agent ngắt kết nối
+		\draw[->, red, dashed] (6,-9.7) -- (11,-9.7)
+		node[midway, above, scale=0.65, fill=white, inner sep=1pt]
+		{(6*) Deauth / Disassoc [nếu STA từ chối BTM]};
+	\end{tikzpicture}
+\end{center}
+
+\textbf{Giải thích luồng bản tin:}
+\begin{enumerate}
+	\item Controller gửi \textit{Client Steering Request} đến Agent chỉ định, bao gồm
+	địa chỉ MAC của STA cần điều phối, BSSID mục tiêu, chế độ thực hiện
+	(Mandate hoặc Opportunity) và cửa sổ thời gian cho phép (Steering Window).
+	\item Agent gửi khung \textit{BTM Request} (802.11v) đến STA, kèm danh sách BSS
+	ứng viên theo thứ tự ưu tiên và thời gian hợp lệ của yêu cầu.
+	\item STA phản hồi bằng \textit{BTM Response} với Status Code: \texttt{Accept}
+	(sẽ chuyển vùng) hoặc \texttt{Reject} kèm lý do từ chối.
+	\item Nếu STA chấp nhận, STA tự ngắt kết nối và thực hiện Association tới BSS
+	mục tiêu.
+	\item Agent báo cáo kết quả về Controller qua \textit{Client Steering BTM Report}
+	mang Status Code từ phản hồi của STA --- Controller dùng thông tin này để
+	đánh giá hiệu quả chiến lược điều phối và điều chỉnh ngưỡng RCPI nếu cần.
+	\item[\textbf{6*.}] Nếu STA từ chối BTM và chế độ là \textit{Mandate}, Agent có
+	thể chủ động gửi \textit{Deauthentication} hoặc \textit{Disassociation} để
+	buộc STA tìm BSS mới~[6].
+\end{enumerate}
+
+
+% ============================================================
+\section{Truy Vấn Khả Năng Thiết Bị Khách (Capability Query)}
+% ============================================================
+
+Trước khi đưa ra quyết định điều phối, Controller cần biết chính xác các chuẩn Wi-Fi
+mà từng STA hỗ trợ --- ví dụ: Wi-Fi 6 (HE), Agile Multiband (802.11k/v/r), hay MLD
+của Wi-Fi 7. Thông tin này ảnh hưởng trực tiếp đến việc chọn BSS mục tiêu phù hợp
+nhất cho từng thiết bị~[7].
+
+
+% ------------------------------------------------------------
+\subsection{Luồng bản tin Capability Query}
+% ------------------------------------------------------------
+
+\begin{center}
+	\begin{tikzpicture}[>=stealth, font=\small]
+		% --- Tiêu đề ---
+		\node[draw, fill=gray!15, minimum width=2.8cm, minimum height=0.6cm]
+		(C) at (0, 0) {Controller};
+		\node[draw, fill=gray!15, minimum width=2.8cm, minimum height=0.6cm]
+		(A) at (8, 0) {Agent};
+		
+		% --- Lifelines ---
+		\draw[dashed, gray!50] (0,-0.4) -- (0,-7.5);
+		\draw[dashed, gray!50] (8,-0.4) -- (8,-7.5);
+		
+		% Bước 1: Controller → Agent
+		\draw[->] (0,-1.4) -- (8,-1.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(1) Client Capability Query};
+		\node[scale=0.6, gray, align=center] at (4,-2.1)
+		{\textit{Chứa MAC của STA cần truy vấn và BSSID Agent đang phục vụ STA}};
+		
+		% Bước 2: Agent → Controller
+		\draw[->] (8,-3.4) -- (0,-3.4)
+		node[midway, above, scale=0.7, fill=white, inner sep=1pt]
+		{(2) Client Capability Report};
+		\node[scale=0.6, gray, align=center] at (4,-4.1)
+		{\textit{Chứa toàn bộ nội dung khung (Re)Association Request gốc của STA}};
+		
+		% Hộp nội dung Report
+		\node[draw, dashed, fill=yellow!15, align=left, scale=0.65] at (4,-5.5) {
+			\textbf{Thông tin trích xuất từ (Re)Assoc Request:} \\
+			$\bullet$ Supported Rates \& HT/VHT/HE/EHT Capabilities \\
+			$\bullet$ Extended Capabilities (802.11k/v/r, MBO) \\
+			$\bullet$ RSN Information (AKM suites hỗ trợ)
+		};
+	\end{tikzpicture}
+\end{center}
+
+\textbf{Giải thích luồng bản tin:}
+\begin{enumerate}
+	\item Controller gửi \textit{Client Capability Query} đến Agent đang phục vụ STA,
+	chỉ định địa chỉ MAC của STA cần truy vấn.
+	\item Agent trả về \textit{Client Capability Report} chứa \textbf{toàn bộ nội dung
+		khung (Re)Association Request} mà STA đã gửi khi gia nhập mạng~[8]. Từ khung
+	này, Controller có thể trích xuất:
+	\begin{itemize}
+		\item Các chuẩn Wi-Fi hỗ trợ: HT (Wi-Fi 4), VHT (Wi-Fi 5), HE (Wi-Fi 6),
+		EHT (Wi-Fi 7).
+		\item Tính năng nâng cao: 802.11k (Neighbor Report), 802.11v (BTM),
+		802.11r (Fast Roaming), MBO (Multi-Band Operation).
+		\item Các bộ suite xác thực (AKM) được hỗ trợ.
+	\end{itemize}
+\end{enumerate}
+
+
+% ============================================================
+\section{Kiểm Soát Hiệp Hội (Association Control)}
+% ============================================================
+
+Cơ chế Association Control cho phép Controller \textbf{chặn có chọn lọc} một số STA
+nhất định không được kết nối vào các BSS cụ thể trong một khoảng thời gian xác
+định~[9]. Đây là công cụ chính để thực hiện cân bằng tải giữa các BSS và hỗ trợ
+quá trình điều phối chuyển vùng.
+
+Controller gửi \textbf{Client Association Control Request} đến Agent với hai chế độ:
+\begin{itemize}
+	\item \textbf{Block:} Agent từ chối \textit{Association Request} từ STA được chỉ
+	định và không phản hồi \textit{Probe Request} của STA đó trên BSS bị chặn.
+	Điều này buộc STA phải tìm kiếm và kết nối vào BSS khác~[9, 10].
+	\item \textbf{Unblock:} Hủy bỏ lệnh chặn trước đó, cho phép STA kết nối trở lại
+	BSS đó bình thường.
+\end{itemize}
+
+Thông thường, lệnh Block được gửi \textit{trước} khi Controller ra lệnh Steering ---
+đảm bảo BSS cũ sẽ từ chối nếu STA cố kết nối lại sau khi bị điều phối. Sau khi STA
+đã liên kết thành công với BSS mục tiêu, Controller gửi lệnh Unblock để trả lại trạng
+thái bình thường~[9].
+
+
+% ============================================================
+\section{Bản Tin Tunneled}
+% ============================================================
+
+Một số khung quản lý 802.11 do STA gửi cần được \textbf{xử lý tập trung tại
+	Controller} thay vì xử lý cục bộ tại Agent --- ví dụ: yêu cầu thông tin mạng (ANQP
+Query cho Hotspot 2.0), truy vấn chuyển vùng (BTM Query) hoặc yêu cầu đo lường
+kênh~[11, 12].
+
+Trong trường hợp này, Agent \textbf{không tự xử lý} mà đóng gói toàn bộ khung 802.11
+vào bản tin \textbf{Tunneled Message} và chuyển tiếp về Controller qua giao thức
+1905.1. Controller phân tích nội dung, tạo phản hồi phù hợp và gửi lại cho Agent để
+chuyển tiếp xuống STA~[11, 12].
+
+Cơ chế này mang lại hai lợi ích chính:
+\begin{itemize}
+	\item \textbf{Xử lý nhất quán:} Mọi yêu cầu cùng loại từ mọi STA trong mạng đều
+	được Controller xử lý theo cùng một chính sách, tránh sự không đồng nhất
+	giữa các Agent.
+	\item \textbf{Tập trung dữ liệu:} Controller thu thập được toàn bộ thông tin yêu
+	cầu từ các STA --- dữ liệu quý giá để phân tích hành vi thiết bị và tối ưu
+	hóa vùng phủ.
+\end{itemize}
+
+
+% ============================================================
+\section{Các Điểm Kỹ Thuật Then Chốt}
+% ============================================================
+
+\begin{itemize}
+	\item \textbf{Topology Notification (Broadcast):} Bản tin này được Agent gửi ngay
+	khi có thay đổi trạng thái STA và Controller phát quảng bá đến toàn bộ mạng.
+	Cơ chế này đảm bảo mọi Agent đều cập nhật được vị trí di chuyển của client
+	trong thời gian thực, là nền tảng để tối ưu hóa bảng định tuyến Backhaul.
+	
+	\item \textbf{Client Disassociation Stats:} Ngoài thông báo ngắt kết nối, bản tin
+	này cung cấp dữ liệu phân tích sau phiên: lý do ngắt kết nối, thời lượng,
+	lưu lượng truyền nhận và mức tín hiệu trung bình. Controller dùng dữ liệu
+	tích lũy này để nhận diện vùng phủ kém, điều chỉnh ngưỡng Steering và cải
+	thiện chính sách phân bổ tài nguyên theo thời gian.
+	
+	\item \textbf{RCPI-based Steering (Chủ động):} Agent không cần chờ lệnh từ
+	Controller để thực hiện điều phối. Nếu mức RCPI của một STA giảm xuống dưới
+	ngưỡng được quy định trong \textit{Steering Policy TLV} (đã nhận từ Controller
+	trước đó), Agent có thể chủ động khởi tạo BTM Request hoặc Disassociation để
+	hướng STA sang BSS tốt hơn. Cơ chế phân quyền này giúp giảm độ trễ phản ứng
+	khi Controller bận hoặc liên kết Backhaul có độ trễ cao.
+	
+	\item \textbf{BTM Report (Phản hồi kết quả):} Sau mỗi lần Steering, Agent gửi
+	\textit{Client Steering BTM Report} mang \textit{Status Code} từ phản hồi của
+	STA. Controller dùng mã trạng thái này để xác định việc chuyển vùng có thành
+	công hay không, từ đó quyết định có cần chuyển sang biện pháp mạnh hơn
+	(Deauthentication) hay cập nhật danh sách BSS ứng viên cho lần Steering tiếp
+	theo.
+\end{itemize}
