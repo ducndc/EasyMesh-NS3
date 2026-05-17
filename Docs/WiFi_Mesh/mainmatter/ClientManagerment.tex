@@ -8,7 +8,7 @@
 
 Quản lý thiết bị kết nối (Client Management) là tập hợp các cơ chế cho phép
 \textbf{Controller} duy trì tầm nhìn toàn diện và kiểm soát tập trung đối với mọi
-thiết bị khách (STA) trong mạng Multi-AP~[1, 2]. Thay vì mỗi Agent tự đưa ra quyết
+thiết bị khách (STA) trong mạng Multi-AP. Thay vì mỗi Agent tự đưa ra quyết
 định độc lập, mô hình tập trung này cho phép Controller phân tích toàn cục và điều
 phối hợp lý hơn.
 
@@ -16,34 +16,34 @@ Hệ thống Client Management bao gồm bốn nhóm chức năng chính:
 \begin{itemize}
 	\item \textbf{Thông báo trạng thái (Event Notification):} Agent báo cáo tức thì
 	mỗi khi có STA gia nhập hoặc rời mạng, giúp Controller cập nhật bảng định
-	tuyến theo thời gian thực~[3].
+	tuyến theo thời gian thực.
 	\item \textbf{Truy vấn khả năng (Capability Query):} Controller thu thập thông tin
 	kỹ thuật chi tiết về các chuẩn Wi-Fi mà mỗi STA hỗ trợ để đưa ra quyết định
-	điều phối phù hợp~[7, 8].
+	điều phối phù hợp.
 	\item \textbf{Điều phối chuyển vùng (Client Steering):} Controller ra lệnh hoặc
 	gợi ý Agent hướng STA sang một BSS có chất lượng tín hiệu tốt hơn thông qua
-	khung BTM hoặc ngắt kết nối chủ động~[2, 5, 6].
-	\item \textbf{Kiểm soát hiệp hội (Association Control):} Controller chặn hoặc cho
-	phép STA cụ thể kết nối vào từng BSS, phục vụ cân bằng tải và bảo mật~[9, 10].
+	khung BTM hoặc ngắt kết nối chủ động.
+	\item \textbf{Kiểm soát kết nối (Association Control):} Controller chặn hoặc cho
+	phép STA cụ thể kết nối vào từng BSS, phục vụ cân bằng tải và bảo mật.
 \end{itemize}
 
 Tất cả các chức năng trên đều được thực hiện qua các bản tin 1905.1 mở rộng, đảm bảo
-Controller luôn có cái nhìn nhất quán về toàn bộ mạng~[3].
+Controller luôn có cái nhìn nhất quán về toàn bộ mạng.
 
 
 % ============================================================
-\section{Thông Báo Hiệp Hội Và Ngắt Kết Nối}
+\section{Thông Báo Kết Nối Và Ngắt Kết Nối}
 % ============================================================
 
 Mỗi khi trạng thái kết nối của một STA thay đổi, Agent quản lý BSS đó ngay lập tức
 gửi bản tin thông báo đến Controller theo cơ chế \textbf{Fast Notification} --- không
 chờ chu kỳ báo cáo định kỳ. Nhờ vậy, Controller luôn cập nhật được vị trí thực tế
 của từng client trong mạng, là dữ liệu đầu vào quan trọng cho các quyết định
-điều phối~[3].
+điều phối.
 
 
 % ------------------------------------------------------------
-\subsection{Luồng Bản Tin Sự Kiện Hiệp Hội Và Ngắt Kết Nối}
+\subsection{Luồng Bản Tin Sự Kiện Kết Nối Và Ngắt Kết Nối}
 % ------------------------------------------------------------
 
 \begin{center}
@@ -79,7 +79,7 @@ của từng client trong mạng, là dữ liệu đầu vào quan trọng cho c
 		{(2) 1905 Topology Notification};
 		\node[scale=0.6, gray, align=center] at (8.25,-4.6)
 		{\textit{Chứa Client Association Event TLV:}
-			\textit{MAC STA, BSSID, thời điểm hiệp hội}};
+			\textit{MAC STA, BSSID, thời điểm kết nối}};
 		
 		% Bước 3: Controller broadcast
 		\draw[->, blue, dashed] (11,-5.6) -- (5.5,-5.6)
@@ -124,7 +124,7 @@ của từng client trong mạng, là dữ liệu đầu vào quan trọng cho c
 	thiết lập kết nối Wi-Fi ở lớp vật lý và lớp bảo mật.
 	\item Agent ngay lập tức gửi \textit{1905 Topology Notification} đến Controller,
 	kèm \textit{Client Association Event TLV} mang địa chỉ MAC của STA, BSSID
-	đang phục vụ và thời điểm hiệp hội.
+	đang phục vụ và thời điểm kết nối.
 	\item Controller cập nhật bảng định tuyến và phát quảng bá thông tin này đến
 	tất cả Agent còn lại để đồng bộ trạng thái toàn mạng.
 	\item STA gửi khung \textit{Disassociation} hoặc bị Agent ngắt kết nối do hết
@@ -134,7 +134,7 @@ của từng client trong mạng, là dữ liệu đầu vào quan trọng cho c
 	\item Agent gửi thêm \textit{Client Disassociation Stats TLV} cung cấp số liệu
 	phiên: thời lượng kết nối, tổng lưu lượng truyền/nhận và mức tín hiệu
 	trung bình --- dữ liệu này giúp Controller phân tích chất lượng vùng phủ
-	và cải thiện chính sách điều phối~[4].
+	và cải thiện chính sách điều phối.
 	\item Controller phát quảng bá cập nhật đến toàn mạng, xóa STA khỏi bảng
 	định tuyến tại mọi Agent.
 \end{enumerate}
@@ -145,16 +145,16 @@ của từng client trong mạng, là dữ liệu đầu vào quan trọng cho c
 % ============================================================
 
 Client Steering là cơ chế cho phép Controller hướng một STA rời khỏi BSS hiện tại và
-kết nối vào một BSS mục tiêu có chất lượng tín hiệu hoặc tải mạng tốt hơn~[2]. Có hai
+kết nối vào một BSS mục tiêu có chất lượng tín hiệu hoặc tải mạng tốt hơn. Có hai
 chế độ hoạt động:
 
 \begin{itemize}
 	\item \textbf{Steering Mandate} (\textit{Bắt buộc}): Controller yêu cầu Agent thực
 	hiện ngay lập tức. Agent dùng BTM Request hoặc ngắt kết nối chủ động để buộc
-	STA chuyển vùng trong khoảng thời gian cho phép~[2, 6].
+	STA chuyển vùng trong khoảng thời gian cho phép.
 	\item \textbf{Steering Opportunity} (\textit{Tự quyết}): Controller cấp cho Agent
 	một khoảng thời gian để tự đánh giá và thực hiện điều phối phù hợp với điều
-	kiện RF thực tế, không bắt buộc chuyển vùng ngay~[2, 6].
+	kiện RF thực tế, không bắt buộc chuyển vùng ngay.
 \end{itemize}
 
 Ngoài ra, Agent có thể \textbf{chủ động} thực hiện điều phối mà không cần lệnh từ
@@ -169,7 +169,7 @@ phân phối trước đó.
 
 Quy trình sử dụng khung \textbf{BSS Transition Management (BTM)} theo chuẩn IEEE
 802.11v để yêu cầu STA chủ động chuyển vùng --- ít gây gián đoạn hơn so với việc
-ngắt kết nối cưỡng bức~[5].
+ngắt kết nối cưỡng bức.
 
 \begin{center}
 	\begin{tikzpicture}[>=stealth, font=\small]
@@ -235,7 +235,7 @@ ngắt kết nối cưỡng bức~[5].
 	địa chỉ MAC của STA cần điều phối, BSSID mục tiêu, chế độ thực hiện
 	(Mandate hoặc Opportunity) và cửa sổ thời gian cho phép (Steering Window).
 	\item Agent gửi khung \textit{BTM Request} (802.11v) đến STA, kèm danh sách BSS
-	ứng viên theo thứ tự ưu tiên và thời gian hợp lệ của yêu cầu.
+	ứng viên theo thứ tự ưu tiên và thời gian hợp lệ của yêu cầuc
 	\item STA phản hồi bằng \textit{BTM Response} với Status Code: \texttt{Accept}
 	(sẽ chuyển vùng) hoặc \texttt{Reject} kèm lý do từ chối.
 	\item Nếu STA chấp nhận, STA tự ngắt kết nối và thực hiện Association tới BSS
@@ -245,7 +245,7 @@ ngắt kết nối cưỡng bức~[5].
 	đánh giá hiệu quả chiến lược điều phối và điều chỉnh ngưỡng RCPI nếu cần.
 	\item[\textbf{6*.}] Nếu STA từ chối BTM và chế độ là \textit{Mandate}, Agent có
 	thể chủ động gửi \textit{Deauthentication} hoặc \textit{Disassociation} để
-	buộc STA tìm BSS mới~[6].
+	buộc STA tìm BSS mới.
 \end{enumerate}
 
 
@@ -256,7 +256,7 @@ ngắt kết nối cưỡng bức~[5].
 Trước khi đưa ra quyết định điều phối, Controller cần biết chính xác các chuẩn Wi-Fi
 mà từng STA hỗ trợ --- ví dụ: Wi-Fi 6 (HE), Agile Multiband (802.11k/v/r), hay MLD
 của Wi-Fi 7. Thông tin này ảnh hưởng trực tiếp đến việc chọn BSS mục tiêu phù hợp
-nhất cho từng thiết bị~[7].
+nhất cho từng thiết bị.
 
 
 % ------------------------------------------------------------
@@ -317,19 +317,19 @@ nhất cho từng thiết bị~[7].
 
 
 % ============================================================
-\section{Kiểm Soát Hiệp Hội (Association Control)}
+\section{Kiểm Soát Kết Nối (Association Control)}
 % ============================================================
 
 Cơ chế Association Control cho phép Controller \textbf{chặn có chọn lọc} một số STA
 nhất định không được kết nối vào các BSS cụ thể trong một khoảng thời gian xác
-định~[9]. Đây là công cụ chính để thực hiện cân bằng tải giữa các BSS và hỗ trợ
+đNố. Đây là công cụ chính để thực hiện cân bằng tải giữa các BSS và hỗ trợ
 quá trình điều phối chuyển vùng.
 
 Controller gửi \textbf{Client Association Control Request} đến Agent với hai chế độ:
 \begin{itemize}
 	\item \textbf{Block:} Agent từ chối \textit{Association Request} từ STA được chỉ
 	định và không phản hồi \textit{Probe Request} của STA đó trên BSS bị chặn.
-	Điều này buộc STA phải tìm kiếm và kết nối vào BSS khác~[9, 10].
+	Điều này buộc STA phải tìm kiếm và kết nối vào BSS khác.
 	\item \textbf{Unblock:} Hủy bỏ lệnh chặn trước đó, cho phép STA kết nối trở lại
 	BSS đó bình thường.
 \end{itemize}
@@ -337,7 +337,7 @@ Controller gửi \textbf{Client Association Control Request} đến Agent với 
 Thông thường, lệnh Block được gửi \textit{trước} khi Controller ra lệnh Steering ---
 đảm bảo BSS cũ sẽ từ chối nếu STA cố kết nối lại sau khi bị điều phối. Sau khi STA
 đã liên kết thành công với BSS mục tiêu, Controller gửi lệnh Unblock để trả lại trạng
-thái bình thường~[9].
+thái bình thường.
 
 
 % ============================================================
@@ -347,12 +347,12 @@ thái bình thường~[9].
 Một số khung quản lý 802.11 do STA gửi cần được \textbf{xử lý tập trung tại
 	Controller} thay vì xử lý cục bộ tại Agent --- ví dụ: yêu cầu thông tin mạng (ANQP
 Query cho Hotspot 2.0), truy vấn chuyển vùng (BTM Query) hoặc yêu cầu đo lường
-kênh~[11, 12].
+kênh.
 
 Trong trường hợp này, Agent \textbf{không tự xử lý} mà đóng gói toàn bộ khung 802.11
 vào bản tin \textbf{Tunneled Message} và chuyển tiếp về Controller qua giao thức
 1905.1. Controller phân tích nội dung, tạo phản hồi phù hợp và gửi lại cho Agent để
-chuyển tiếp xuống STA~[11, 12].
+chuyển tiếp xuống STA.
 
 Cơ chế này mang lại hai lợi ích chính:
 \begin{itemize}
@@ -388,10 +388,10 @@ Cơ chế này mang lại hai lợi ích chính:
 	hướng STA sang BSS tốt hơn. Cơ chế phân quyền này giúp giảm độ trễ phản ứng
 	khi Controller bận hoặc liên kết Backhaul có độ trễ cao.
 	
-	\item \textbf{BTM Report (Phản hồi kết quả):} Sau mỗi lần Steering, Agent gửi
+	\item \textbf{BTM Report (Phản hồi kết quả):} Sau mỗi lần chuyển vùng, Agent gửi
 	\textit{Client Steering BTM Report} mang \textit{Status Code} từ phản hồi của
 	STA. Controller dùng mã trạng thái này để xác định việc chuyển vùng có thành
 	công hay không, từ đó quyết định có cần chuyển sang biện pháp mạnh hơn
-	(Deauthentication) hay cập nhật danh sách BSS ứng viên cho lần Steering tiếp
+	(Deauthentication) hay cập nhật danh sách BSS ứng viên cho lần chuyển vùng tiếp
 	theo.
 \end{itemize}

@@ -24,6 +24,13 @@ mạng lưới một cách tự động và bảo mật.
 	\textit{WPS Enrollee} --- yêu cầu và nhận thông tin đăng nhập.
 \end{itemize}
 
+\textbf{Quy trình kỹ thuật}
+\begin{enumerate}
+	\item \textbf{Giai đoạn khám phá: } Khi nút được nhấn, Enrollee sẽ quét tất cả các kênh 802.11 mà nó hỗ trợ để tìm Registrar đang ở chế độ PBC đang hoạt động
+	. Nó gửi các yêu cầu dò tìm (probe requests) với ID mật khẩu thiết bị được đặt là "PushButton"
+	\item \textbf{Xác thực mặc định: } Vì không có mã PIN thực tế được nhập, cả Registrar và Enrollee đều sử dụng giá trị mặc định là '00000000' (tám số không) làm mật khẩu thiết bị để thực hiện các bước trao đổi trong giao thức đăng ký (từ thông điệp M3 đến M8)
+\end{enumerate}
+
 \begin{center}
 	\begin{tikzpicture}[>=stealth, font=\small]
 		% --- Tiêu đề các thành phần ---
@@ -93,6 +100,18 @@ mạng lưới một cách tự động và bảo mật.
 	\item Controller phản hồi, hoàn tất quá trình EN gia nhập mạng EasyMesh.
 \end{enumerate}
 
+\textbf{Cơ chế an toàn: Phát hiện chồng lấn phiên (Session Overlap)}
+Để tránh trường hợp thiết bị kết nối nhầm vào mạng của hàng xóm cũng đang nhấn nút PBC, tiêu chuẩn quy định:
+\begin{itemize}
+	\item \textbf{Phía Enrollee: } Nếu trong quá trình quét, Enrollee phát hiện có nhiều hơn một Registrar đang ở chế độ PBC, nó phải hủy nỗ lực kết nối và báo lỗi "chồng lấn phiên"
+	\item \textbf{Phía Registrar:} Registrar sẽ kiểm tra trong cửa sổ 120 giây trước đó (Monitor Time). Nếu nó nhận được yêu cầu từ nhiều hơn một Enrollee, nó sẽ báo lỗi và từ chối đi vào chế độ PBC đang hoạt động
+\end{itemize}
+
+\textbf{Các cân nhắc về bảo mật}
+\begin{itemize}
+	\item \textbf{Tính xác thực: } PBC được coi là phương thức không được xác thực (unauthenticated). Nó chỉ bảo vệ chống lại các cuộc tấn công nghe lén thụ động (eavesdropping) nhưng không chống lại được các cuộc tấn công chủ động (như kẻ tấn công giả mạo AP trên kênh khác để lừa thiết bị kết nối vào)
+	\item \textbf{Hạn chế sử dụng:} Do tính bảo mật thấp hơn phương thức PIN, PBC không được phép sử dụng để thiết lập các Registrar bên ngoài (External Registrar) hoặc để thay đổi các cài đặt quản trị của AP
+\end{itemize}
 
 % ============================================================
 \section{Phương Pháp DPP Onboarding Qua Wi-Fi}
