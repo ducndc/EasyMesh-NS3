@@ -1041,7 +1041,6 @@ EasyMeshSimulation::InstallTcpUplink()
 void 
 EasyMeshSimulation::InstallBackhaulStress()
 {
-    // Không cần backhaul stress trong cấu hình nhỏ này
     NS_LOG_INFO("BackhaulStress disabled (only 2 agents)");
 }
 
@@ -1109,36 +1108,11 @@ EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
 {
     NS_ASSERT(anim);
 
-    const uint8_t backhaulRed = 231;
-    const uint8_t backhaulGreen = 76;
-    const uint8_t backhaulBlue = 60;
-    const uint8_t fronthaulRed = 52;
-    const uint8_t fronthaulGreen = 152;
-    const uint8_t fronthaulBlue = 219;
-
     for (const auto& link : m_links)
     {
         std::ostringstream label;
-        uint8_t red = fronthaulRed;
-        uint8_t green = fronthaulGreen;
-        uint8_t blue = fronthaulBlue;
-        if (!link->IsActive())
-        {
-            red = 127;
-            green = 140;
-            blue = 141;
-        }
         if (link->GetType() == LinkType::BACKHAUL)
         {
-            red = backhaulRed;
-            green = backhaulGreen;
-            blue = backhaulBlue;
-            if (!link->IsActive())
-            {
-                red = 127;
-                green = 140;
-                blue = 141;
-            }
             uint32_t childAgent = 0;
             for (; childAgent < NUM_AGENT; ++childAgent)
             {
@@ -1191,7 +1165,7 @@ EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
             label << " OFFLINE";
         }
         label << " RSSI=" << std::fixed << std::setprecision(1) << link->GetRssi() << "dBm";
-        anim->UpdateLinkDescription(link->GetSrc(), link->GetDst(), label.str(), red, green, blue);
+        anim->UpdateLinkDescription(link->GetSrc(), link->GetDst(), label.str());
     }
 }
 
