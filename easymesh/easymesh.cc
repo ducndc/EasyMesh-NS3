@@ -583,7 +583,7 @@ EasyMeshSimulation::CreateWifiChannels()
 void 
 EasyMeshSimulation::CreateBackhaulLinks()
 {
-    m_wifiHelper.SetStandard(WIFI_STANDARD_80211ax);
+    m_wifiHelper.SetStandard(WIFI_STANDARD_80211be);
     m_wifiHelper.SetRemoteStationManager("ns3::IdealWifiManager");
 
     m_phyHelper = YansWifiPhyHelper();

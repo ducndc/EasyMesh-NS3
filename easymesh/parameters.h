@@ -3,9 +3,9 @@
 
 // ── Topology ─────────────────────────────────────────────────
 #define DURATION        15.0    // s – total simulation time
-#define SCENARIO_RUNS   10
-#define NUM_AGENT       4
-#define NUM_STA         3
+#define SCENARIO_RUNS   1
+#define NUM_AGENT       10
+#define NUM_STA         1
 #define NUM_CONTROLLER	1
 
 // ── Traffic – UDP CBR (OnOff) ────────────────────────────────
