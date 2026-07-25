@@ -77,8 +77,8 @@ cd ns-3.46.1
 | `--duration`      | double | `15.0`         | Simulation duration in seconds                              |
 | `--scenarios`     | uint32 | `1`            | Number of randomized scenario runs                          |
 | `--clients`       | uint32 | `1`            | Number of STA clients                                       |
-| `--offlineAgent`  | uint32 | `1`            | Agent ID to take offline mid-run                             |
-| `--offlineTime`   | double | `6.0`          | Simulation time (s) at which the Agent goes offline           |
+| `--offlineAgents`  | string | `1`            | Comma-separated agent IDs to take offline mid-run (e.g. `1,3,5`) |
+| `--offlineTime`   | double | `6.0`          | Simulation time (s) at which the listed agent(s) go offline    |
 | `--pcap`          | bool   | `false`        | Enable PCAP capture                                          |
 | `--mstMetric`     | string | `throughput`   | Backhaul MST edge-weight metric: `throughput` \| `rssi`       |
 
@@ -86,6 +86,12 @@ Example — a longer run with 5 clients and RSSI-based MST:
 
 ```bash
 ./ns3 run "easymesh_sim --duration=30 --clients=5 --mstMetric=rssi"
+```
+
+Example — take 3 agents offline simultaneously at t=8s and observe the backhaul MST rebuild around the remaining agents:
+
+```bash
+./ns3 run "easymesh_sim --offlineAgents=1,3,5 --offlineTime=8.0"
 ```
 
 ## Output

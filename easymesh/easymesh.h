@@ -47,7 +47,8 @@ public:
     // ── CLI overrides ─────────────────────────────────────────
     void SetDuration(double s)   { m_duration   = s; }
     void SetScenarioRun(uint32_t run) { m_scenarioRun = run; }
-    void SetOfflineAgentId(uint32_t agentId) { m_offlineAgentId = agentId; }
+    void SetOfflineAgentId(uint32_t agentId) { m_offlineAgentIds = { agentId }; }
+    void SetOfflineAgentIds(std::vector<uint32_t> agentIds) { m_offlineAgentIds = std::move(agentIds); }
     void SetOfflineTime(double timeSeconds) { m_offlineTime = timeSeconds; }
     void SetNumClients(uint32_t n)
     {
@@ -146,7 +147,7 @@ private:
     double   m_duration   = DURATION;
     uint32_t m_numClients = NUM_STA;
     uint32_t m_scenarioRun = 1;
-    uint32_t m_offlineAgentId = OFFLINE_AGENT_ID;
+    std::vector<uint32_t> m_offlineAgentIds = { OFFLINE_AGENT_ID };
     double   m_offlineTime = OFFLINE_TIME;
     bool     m_pcap       = false;
     MstMetric m_mstMetric = MstMetric::THROUGHPUT;

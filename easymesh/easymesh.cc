@@ -6,6 +6,7 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <stdexcept>
 
 using namespace ns3;
 
@@ -705,27 +706,50 @@ EasyMeshSimulation::CreateBackhaulLinks()
 void
 EasyMeshSimulation::HandleAgentOffline()
 {
-    if (m_offlineAgentId >= NUM_AGENT)
+    // Take every requested agent offline first (validating + deduping),
+    // then rebuild the backhaul MST and client associations exactly
+    // once for the whole set — rebuilding per-agent would waste cycles
+    // and, worse, let an already-degraded topology bias which parent
+    // gets picked for the next offline agent in the batch.
+    std::vector<uint32_t> newlyOffline;
+    for (uint32_t agentId : m_offlineAgentIds)
     {
-        NS_LOG_WARN("Ignoring offline event: invalid agent id " << m_offlineAgentId);
+        if (agentId >= NUM_AGENT)
+        {
+            NS_LOG_WARN("Ignoring offline event: invalid agent id " << agentId);
+            continue;
+        }
+        if (!IsAgentOnline(agentId))
+        {
+            continue; // already offline (or duplicate entry) — nothing to do
+        }
+        newlyOffline.push_back(agentId);
+    }
+
+    if (newlyOffline.empty())
+    {
         return;
     }
 
-    if (!IsAgentOnline(m_offlineAgentId))
+    std::ostringstream offlineList;
+    for (size_t i = 0; i < newlyOffline.size(); ++i)
     {
-        return;
+        offlineList << (i ? "," : "") << "A" << newlyOffline[i];
     }
-
-    NS_LOG_INFO("[Controller t=" << Simulator::Now().GetSeconds() << "] AGENT_OFFLINE A"
-                << m_offlineAgentId);
+    NS_LOG_INFO("[Controller t=" << Simulator::Now().GetSeconds() << "] AGENT_OFFLINE "
+                << offlineList.str() << "  (" << newlyOffline.size() << " agent(s))");
 
     std::vector<int32_t> previousParents = m_agentParent;
-    m_agentOnline[m_offlineAgentId] = false;
 
-    auto offlineBackhaulLink = FindBackhaulLinkForAgent(m_offlineAgentId);
-    if (offlineBackhaulLink)
+    for (uint32_t agentId : newlyOffline)
     {
-        offlineBackhaulLink->SetActive(false);
+        m_agentOnline[agentId] = false;
+
+        auto offlineBackhaulLink = FindBackhaulLinkForAgent(agentId);
+        if (offlineBackhaulLink)
+        {
+            offlineBackhaulLink->SetActive(false);
+        }
     }
 
     BuildBackhaulTree();
@@ -772,7 +796,7 @@ EasyMeshSimulation::HandleAgentOffline()
         }
 
         NS_LOG_INFO("STA" << clientId << " uplink reselected A" << currentAgent
-                    << " -> A" << newAgent << " after Agent" << m_offlineAgentId << " offline");
+                    << " -> A" << newAgent << " after " << offlineList.str() << " offline");
         UpdateClientAssociation(clientId, newAgent);
         updatedClients = true;
     }
@@ -1309,7 +1333,7 @@ int main(int argc, char* argv[])
     double   duration   = DURATION;
     uint32_t scenarioRuns = SCENARIO_RUNS;
     uint32_t numClients = NUM_STA;          
-    uint32_t offlineAgentId = OFFLINE_AGENT_ID;
+    std::string offlineAgentsStr = std::to_string(OFFLINE_AGENT_ID); // comma-separated, e.g. "1,3,5"
     double   offlineTime = OFFLINE_TIME;
     bool     pcap       = false;
     std::string mstMetricStr = "throughput";   // "throughput" | "rssi"
@@ -1318,8 +1342,8 @@ int main(int argc, char* argv[])
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("scenarios", "Number of randomized scenario runs", scenarioRuns);
     cmd.AddValue("clients",  "Number of STA clients",   numClients);
-    cmd.AddValue("offlineAgent", "Agent id to take offline during the run", offlineAgentId);
-    cmd.AddValue("offlineTime", "Time in seconds when the agent goes offline", offlineTime);
+    cmd.AddValue("offlineAgents", "Comma-separated agent ids to take offline during the run (e.g. 1,3,5)", offlineAgentsStr);
+    cmd.AddValue("offlineTime", "Time in seconds when the agent(s) go offline", offlineTime);
     cmd.AddValue("pcap",     "Enable PCAP capture",     pcap);
     cmd.AddValue("mstMetric", "Backhaul MST edge metric: throughput | rssi", mstMetricStr);
     cmd.Parse(argc, argv);
@@ -1335,19 +1359,45 @@ int main(int argc, char* argv[])
                   << "' (expected 'throughput' or 'rssi'); defaulting to 'throughput'\n";
     }
 
+    // Parse "1,3,5" -> {1, 3, 5}, skipping blanks/whitespace.
+    std::vector<uint32_t> offlineAgentIds;
+    {
+        std::stringstream ss(offlineAgentsStr);
+        std::string token;
+        while (std::getline(ss, token, ','))
+        {
+            size_t start = token.find_first_not_of(" \t");
+            size_t end   = token.find_last_not_of(" \t");
+            if (start == std::string::npos)
+            {
+                continue; // empty token (e.g. trailing comma)
+            }
+            token = token.substr(start, end - start + 1);
+            try
+            {
+                offlineAgentIds.push_back(static_cast<uint32_t>(std::stoul(token)));
+            }
+            catch (const std::exception&)
+            {
+                std::cerr << "Ignoring invalid --offlineAgents entry: '" << token << "'\n";
+            }
+        }
+    }
+
     RngSeedManager::SetSeed(42);
 
     for (uint32_t run = 1; run <= scenarioRuns; ++run)
     {
         std::cout << "\n=== Scenario " << run << "/" << scenarioRuns
-                  << "  [mstMetric=" << mstMetricStr << "] ===\n" << std::flush;
+                  << "  [mstMetric=" << mstMetricStr << ", offlineAgents=" << offlineAgentsStr
+                  << "] ===\n" << std::flush;
         RngSeedManager::SetRun(run);
 
         EasyMeshSimulation sim;
         sim.SetDuration(duration);
         sim.SetScenarioRun(run);
         sim.SetNumClients(numClients);
-        sim.SetOfflineAgentId(offlineAgentId);
+        sim.SetOfflineAgentIds(offlineAgentIds);
         sim.SetOfflineTime(offlineTime);
         sim.EnablePcap(pcap);
         sim.SetMstMetric(mstMetric);
