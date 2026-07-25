@@ -26,6 +26,9 @@
 
 using namespace ns3;
 
+// ── MST edge-weight strategy for BuildBackhaulTree() ───────────
+enum class MstMetric { THROUGHPUT, RSSI };
+
 class EasyMeshSimulation {
 public:
     EasyMeshSimulation();
@@ -55,6 +58,7 @@ public:
         m_clientFronthaulIfIndex.resize(n, 0);
     }
     void EnablePcap(bool e)      { m_pcap       = e; }
+    void SetMstMetric(MstMetric m) { m_mstMetric = m; }
 
     double ComputeDistance(Vector a, Vector b) const;
 
@@ -145,6 +149,7 @@ private:
     uint32_t m_offlineAgentId = OFFLINE_AGENT_ID;
     double   m_offlineTime = OFFLINE_TIME;
     bool     m_pcap       = false;
+    MstMetric m_mstMetric = MstMetric::THROUGHPUT;
     AnimationInterface* m_animation = nullptr;
 
     // ── Static topology ───────────────────────────────────────

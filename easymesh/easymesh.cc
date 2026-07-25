@@ -181,76 +181,129 @@ EasyMeshSimulation::OptimizeNetworkTopology()
 void
 EasyMeshSimulation::BuildBackhaulTree()
 {
+    // ── Prim's Maximum-Spanning-Tree algorithm ─────────────────
+    // Selects, for every agent, the best possible uplink AP (either
+    // the Controller or another already-connected agent). The edge
+    // weight is pluggable via m_mstMetric:
+    //   • MstMetric::THROUGHPUT — maximizes total achievable Wi-Fi
+    //     throughput (Mbps) across the whole backhaul mesh.
+    //   • MstMetric::RSSI       — maximizes total/weakest-link signal
+    //     strength (dBm) across the mesh, ignoring MCS/throughput.
+    // Both runs use the exact same Prim's procedure below; only the
+    // per-edge weight() lambda differs, so the two cases can be
+    // compared head-to-head by flipping m_mstMetric via SetMstMetric()
+    // or the --mstMetric CLI flag in main().
+    //
+    // Graph: kNodeCount = NUM_AGENT + 1 nodes — index [0, NUM_AGENT)
+    // are agents, index NUM_AGENT is a virtual node for the Controller
+    // (the MST root).
+    //
+    // This is the textbook Prim's MST procedure with weights maximized
+    // instead of minimized (equivalent to running classic Prim's on
+    // negated weights): starting from the root, repeatedly attach the
+    // outside node reachable by the single strongest direct edge from
+    // any node already in the tree. That per-step optimality is what
+    // gives an MST its global guarantee — unlike a fixed processing
+    // order (nearest-to-controller first), which can lock in a parent
+    // before a stronger link from a not-yet-visited agent is ever
+    // considered. Complexity is O(NUM_AGENT^2), negligible for
+    // mesh-sized deployments.
     m_agentParent.assign(NUM_AGENT, -1);
 
-    std::vector<uint32_t> order(NUM_AGENT);
-    std::iota(order.begin(), order.end(), 0);
-    std::sort(order.begin(), order.end(), [this](uint32_t lhs, uint32_t rhs) {
-        return ComputeDistance(CONTROLLER_POS, m_agentPositions[lhs]) <
-               ComputeDistance(CONTROLLER_POS, m_agentPositions[rhs]);
-    });
+    const uint32_t kControllerNode = NUM_AGENT;   // virtual root index
+    const uint32_t kNodeCount      = NUM_AGENT + 1;
 
-    std::vector<double> pathCapacity(NUM_AGENT, 0.0);
-    std::vector<uint32_t> connected;
+    auto positionOf = [this](uint32_t node) -> Vector {
+        return (node == kControllerNode) ? CONTROLLER_POS : m_agentPositions[node];
+    };
+    auto isUsable = [this](uint32_t node) -> bool {
+        return node == kControllerNode || IsAgentOnline(node);
+    };
 
-    for (auto agentId : order)
+    const bool useRssi = (m_mstMetric == MstMetric::RSSI);
+    const char* metricUnit  = useRssi ? "dBm"  : "Mbps";
+    const char* metricLabel = useRssi ? "RSSI" : "capacity";
+
+    // Edge weight in "higher is better" form for whichever metric is active.
+    auto edgeWeight = [this, useRssi](Vector a, Vector b) -> double {
+        const auto rssi = EstimateLinkRssi(a, b);
+        return useRssi ? rssi : EstimateLinkThroughput(rssi);
+    };
+
+    std::vector<bool>    inTree(kNodeCount, false);
+    std::vector<double>  bestWeight(kNodeCount, -std::numeric_limits<double>::infinity());
+                                                            // best direct-edge weight to the tree so far
+    std::vector<int32_t> bestParent(kNodeCount, -1);       // candidate parent achieving that weight
+
+    inTree[kControllerNode] = true;
+
+    // Seed frontier with direct Controller→Agent edges.
+    for (uint32_t node = 0; node < NUM_AGENT; ++node)
     {
-        if (!IsAgentOnline(agentId))
+        if (!isUsable(node))
         {
             continue;
         }
+        bestWeight[node] = edgeWeight(CONTROLLER_POS, positionOf(node));
+        bestParent[node] = static_cast<int32_t>(kControllerNode);
+    }
 
-        const auto directRssi = EstimateLinkRssi(CONTROLLER_POS, m_agentPositions[agentId]);
-        const auto directCapacity = EstimateLinkThroughput(directRssi);
-        const auto directDistance = ComputeDistance(CONTROLLER_POS, m_agentPositions[agentId]);
-
-        int32_t bestParent = -1;
-        double bestCapacity = directCapacity;
-        double bestScore = directCapacity - 0.5 * std::max(0.0, directDistance - TOPOLOGY_TARGET_RADIUS);
-
-        for (auto candidate : connected)
+    for (uint32_t step = 0; step < NUM_AGENT; ++step)
+    {
+        // Pick the outside node with the strongest edge into the current tree.
+        int32_t chosen       = -1;
+        double  chosenWeight = -std::numeric_limits<double>::infinity();
+        for (uint32_t node = 0; node < NUM_AGENT; ++node)
         {
-            if (!IsAgentOnline(candidate))
+            if (inTree[node] || !isUsable(node))
             {
                 continue;
             }
-
-            const auto candidateDistance = ComputeDistance(CONTROLLER_POS, m_agentPositions[candidate]);
-            if (candidateDistance >= directDistance)
+            if (bestWeight[node] > chosenWeight)
             {
-                continue;
-            }
-
-            const auto relayRssi = EstimateLinkRssi(m_agentPositions[candidate], m_agentPositions[agentId]);
-            const auto relayCapacity = EstimateLinkThroughput(relayRssi);
-            const auto endToEndCapacity = std::min(pathCapacity[candidate], relayCapacity);
-            const auto relayDistance = ComputeDistance(m_agentPositions[candidate], m_agentPositions[agentId]);
-
-            double score = endToEndCapacity - 0.25 * relayDistance;
-            if (directDistance > TOPOLOGY_TARGET_RADIUS)
-            {
-                score += 2.0;
-            }
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-                bestParent = static_cast<int32_t>(candidate);
-                bestCapacity = endToEndCapacity;
+                chosenWeight = bestWeight[node];
+                chosen       = static_cast<int32_t>(node);
             }
         }
 
-        m_agentParent[agentId] = bestParent;
-        pathCapacity[agentId] = bestCapacity;
-        connected.push_back(agentId);
-
-        if (bestParent < 0)
+        if (chosen < 0)
         {
-            NS_LOG_INFO("Backhaul parent for Agent" << agentId << " is Controller");
+            break; // remaining agents are offline / unreachable
+        }
+
+        inTree[chosen] = true;
+        m_agentParent[chosen] = (bestParent[chosen] == static_cast<int32_t>(kControllerNode))
+                                 ? -1
+                                 : bestParent[chosen];
+
+        if (m_agentParent[chosen] < 0)
+        {
+            NS_LOG_INFO("MST(" << metricLabel << "): Backhaul parent for Agent" << chosen
+                        << " is Controller  (" << metricLabel << "=" << chosenWeight << metricUnit << ")");
         }
         else
         {
-            NS_LOG_INFO("Backhaul parent for Agent" << agentId << " is Agent" << bestParent);
+            NS_LOG_INFO("MST(" << metricLabel << "): Backhaul parent for Agent" << chosen
+                        << " is Agent" << m_agentParent[chosen]
+                        << "  (" << metricLabel << "=" << chosenWeight << metricUnit << ")");
+        }
+
+        // Relax: does the newly attached node offer a stronger direct edge
+        // to any node still outside the tree?
+        for (uint32_t node = 0; node < NUM_AGENT; ++node)
+        {
+            if (inTree[node] || !isUsable(node))
+            {
+                continue;
+            }
+
+            const auto w = edgeWeight(positionOf(chosen), positionOf(node));
+
+            if (w > bestWeight[node])
+            {
+                bestWeight[node] = w;
+                bestParent[node] = static_cast<int32_t>(chosen);
+            }
         }
     }
 }
@@ -1259,6 +1312,7 @@ int main(int argc, char* argv[])
     uint32_t offlineAgentId = OFFLINE_AGENT_ID;
     double   offlineTime = OFFLINE_TIME;
     bool     pcap       = false;
+    std::string mstMetricStr = "throughput";   // "throughput" | "rssi"
 
     CommandLine cmd;
     cmd.AddValue("duration", "Simulation duration (s)", duration);
@@ -1267,13 +1321,26 @@ int main(int argc, char* argv[])
     cmd.AddValue("offlineAgent", "Agent id to take offline during the run", offlineAgentId);
     cmd.AddValue("offlineTime", "Time in seconds when the agent goes offline", offlineTime);
     cmd.AddValue("pcap",     "Enable PCAP capture",     pcap);
+    cmd.AddValue("mstMetric", "Backhaul MST edge metric: throughput | rssi", mstMetricStr);
     cmd.Parse(argc, argv);
+
+    MstMetric mstMetric = MstMetric::THROUGHPUT;
+    if (mstMetricStr == "rssi")
+    {
+        mstMetric = MstMetric::RSSI;
+    }
+    else if (mstMetricStr != "throughput")
+    {
+        std::cerr << "Unknown --mstMetric '" << mstMetricStr
+                  << "' (expected 'throughput' or 'rssi'); defaulting to 'throughput'\n";
+    }
 
     RngSeedManager::SetSeed(42);
 
     for (uint32_t run = 1; run <= scenarioRuns; ++run)
     {
-        std::cout << "\n=== Scenario " << run << "/" << scenarioRuns << " ===\n" << std::flush;
+        std::cout << "\n=== Scenario " << run << "/" << scenarioRuns
+                  << "  [mstMetric=" << mstMetricStr << "] ===\n" << std::flush;
         RngSeedManager::SetRun(run);
 
         EasyMeshSimulation sim;
@@ -1283,6 +1350,7 @@ int main(int argc, char* argv[])
         sim.SetOfflineAgentId(offlineAgentId);
         sim.SetOfflineTime(offlineTime);
         sim.EnablePcap(pcap);
+        sim.SetMstMetric(mstMetric);
 
         sim.BuildTopology();
         sim.InstallProtocolStack();
