@@ -4,7 +4,7 @@ A Wi-Fi EasyMesh network simulation built on [ns-3](https://www.nsnam.org/), mod
 
 ## Features
 
-- **Multi-AP backhaul mesh** — one Controller and multiple Agents (APs), interconnected over Wi-Fi (802.11be) or Ethernet.
+- **Multi-AP backhaul mesh** — one Controller and multiple Agents (APs), interconnected over Wi-Fi (802.11be) or Ethernet, deployed over a configurable coverage area (default ≈ 90m × 90m, close to 100m × 100m — see `parameters.h`).
 - **Backhaul topology selection via MST** — each Agent's uplink AP is chosen by a Prim's Maximum-Spanning-Tree algorithm, selectable at runtime between two edge-weight strategies:
   - `throughput` — maximizes aggregate achievable Wi-Fi throughput across the mesh.
   - `rssi` — maximizes aggregate/strongest signal quality across the mesh.
@@ -77,6 +77,7 @@ cd ns-3.46.1
 | `--duration`      | double | `15.0`         | Simulation duration in seconds                              |
 | `--scenarios`     | uint32 | `1`            | Number of randomized scenario runs                          |
 | `--clients`       | uint32 | `1`            | Number of STA clients                                       |
+| `--agents`        | uint32 | `10`           | Number of Agents (APs) in the backhaul mesh                  |
 | `--offlineAgents`  | string | `1`            | Comma-separated agent IDs to take offline mid-run (e.g. `1,3,5`) |
 | `--offlineTime`   | double | `6.0`          | Simulation time (s) at which the listed agent(s) go offline    |
 | `--pcap`          | bool   | `false`        | Enable PCAP capture                                          |
@@ -92,6 +93,12 @@ Example — take 3 agents offline simultaneously at t=8s and observe the backhau
 
 ```bash
 ./ns3 run "easymesh_sim --offlineAgents=1,3,5 --offlineTime=8.0"
+```
+
+Example — a larger mesh with 20 Agents and 5 clients:
+
+```bash
+./ns3 run "easymesh_sim --agents=20 --clients=5"
 ```
 
 ## Output

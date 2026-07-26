@@ -4,7 +4,7 @@
 // ── Topology ─────────────────────────────────────────────────
 #define DURATION        15.0    // s – total simulation time
 #define SCENARIO_RUNS   1
-#define NUM_AGENT       10
+#define NUM_AGENT       15
 #define NUM_STA         1
 #define NUM_CONTROLLER	1
 
@@ -43,12 +43,12 @@
 
 // ── Topology optimization ─────────────────────────────────────
 #define TOPOLOGY_AREA_MIN_X 5.0
-#define TOPOLOGY_AREA_MAX_X 35.0
+#define TOPOLOGY_AREA_MAX_X 95.0
 #define TOPOLOGY_AREA_MIN_Y 5.0
-#define TOPOLOGY_AREA_MAX_Y 35.0
-#define TOPOLOGY_TARGET_RADIUS 22.0
-#define TOPOLOGY_MAX_RADIUS 28.0
-#define TOPOLOGY_MIN_AGENT_SEPARATION 12.0
+#define TOPOLOGY_AREA_MAX_Y 95.0
+#define TOPOLOGY_TARGET_RADIUS 70.0
+#define TOPOLOGY_MAX_RADIUS 95.0
+#define TOPOLOGY_MIN_AGENT_SEPARATION 25.0
 
 // ── Evaluation ───────────────────────────────────────────────
 #define FLOWMON_ENABLED true

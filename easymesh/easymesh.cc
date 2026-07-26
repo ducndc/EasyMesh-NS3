@@ -13,12 +13,6 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("EasyMeshSim");
 
 const Vector EasyMeshSimulation::CONTROLLER_POS   = Vector(0.0, 0.0, 1.5);
-const Vector EasyMeshSimulation::AGENT_POSITIONS[NUM_AGENT] = {
-    Vector(20.0, 0.0, 1.5),
-    Vector(0.0, 20.0, 1.5),
-    Vector(20.0, 20.0, 1.5),
-    Vector(10.0, 10.0, 1.5)
-};
 
 EasyMeshSimulation::EasyMeshSimulation()  
 {
@@ -98,7 +92,7 @@ EasyMeshSimulation::GenerateRandomAgentPositions()
     radiusVar->SetAttribute("Min", DoubleValue(0.0));
     radiusVar->SetAttribute("Max", DoubleValue(1.0));
 
-    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
     {
         const double angle = angleVar->GetValue();
         const double radius = std::sqrt(minRadiusSquared +
@@ -125,7 +119,7 @@ EasyMeshSimulation::OptimizeNetworkTopology()
 
     for (uint32_t iteration = 0; iteration < 15; ++iteration)
     {
-        for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+        for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
         {
             Vector delta = m_agentPositions[agentId] - CONTROLLER_POS;
             double distance = ComputeDistance(m_agentPositions[agentId], CONTROLLER_POS);
@@ -144,9 +138,9 @@ EasyMeshSimulation::OptimizeNetworkTopology()
                                                           TOPOLOGY_AREA_MAX_Y);
         }
 
-        for (uint32_t left = 0; left < NUM_AGENT; ++left)
+        for (uint32_t left = 0; left < m_numAgents; ++left)
         {
-            for (uint32_t right = left + 1; right < NUM_AGENT; ++right)
+            for (uint32_t right = left + 1; right < m_numAgents; ++right)
             {
                 Vector diff = m_agentPositions[right] - m_agentPositions[left];
                 double distance = ComputeDistance(m_agentPositions[left], m_agentPositions[right]);
@@ -171,7 +165,7 @@ EasyMeshSimulation::OptimizeNetworkTopology()
         }
     }
 
-    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
     {
         NS_LOG_INFO("Optimized Agent" << agentId << " position=("
                     << m_agentPositions[agentId].x << ","
@@ -195,8 +189,8 @@ EasyMeshSimulation::BuildBackhaulTree()
     // compared head-to-head by flipping m_mstMetric via SetMstMetric()
     // or the --mstMetric CLI flag in main().
     //
-    // Graph: kNodeCount = NUM_AGENT + 1 nodes — index [0, NUM_AGENT)
-    // are agents, index NUM_AGENT is a virtual node for the Controller
+    // Graph: kNodeCount = m_numAgents + 1 nodes — index [0, m_numAgents)
+    // are agents, index m_numAgents is a virtual node for the Controller
     // (the MST root).
     //
     // This is the textbook Prim's MST procedure with weights maximized
@@ -207,17 +201,17 @@ EasyMeshSimulation::BuildBackhaulTree()
     // gives an MST its global guarantee — unlike a fixed processing
     // order (nearest-to-controller first), which can lock in a parent
     // before a stronger link from a not-yet-visited agent is ever
-    // considered. Complexity is O(NUM_AGENT^2), negligible for
+    // considered. Complexity is O(m_numAgents^2), negligible for
     // mesh-sized deployments.
-    m_agentParent.assign(NUM_AGENT, -1);
+    m_agentParent.assign(m_numAgents, -1);
 
-    const uint32_t kControllerNode = NUM_AGENT;   // virtual root index
-    const uint32_t kNodeCount      = NUM_AGENT + 1;
+    const uint32_t kControllerNode = m_numAgents;   // virtual root index
+    const uint32_t kNodeCount      = m_numAgents + 1;
 
-    auto positionOf = [this](uint32_t node) -> Vector {
+    auto positionOf = [this, kControllerNode](uint32_t node) -> Vector {
         return (node == kControllerNode) ? CONTROLLER_POS : m_agentPositions[node];
     };
-    auto isUsable = [this](uint32_t node) -> bool {
+    auto isUsable = [this, kControllerNode](uint32_t node) -> bool {
         return node == kControllerNode || IsAgentOnline(node);
     };
 
@@ -239,7 +233,7 @@ EasyMeshSimulation::BuildBackhaulTree()
     inTree[kControllerNode] = true;
 
     // Seed frontier with direct Controller→Agent edges.
-    for (uint32_t node = 0; node < NUM_AGENT; ++node)
+    for (uint32_t node = 0; node < m_numAgents; ++node)
     {
         if (!isUsable(node))
         {
@@ -249,12 +243,12 @@ EasyMeshSimulation::BuildBackhaulTree()
         bestParent[node] = static_cast<int32_t>(kControllerNode);
     }
 
-    for (uint32_t step = 0; step < NUM_AGENT; ++step)
+    for (uint32_t step = 0; step < m_numAgents; ++step)
     {
         // Pick the outside node with the strongest edge into the current tree.
         int32_t chosen       = -1;
         double  chosenWeight = -std::numeric_limits<double>::infinity();
-        for (uint32_t node = 0; node < NUM_AGENT; ++node)
+        for (uint32_t node = 0; node < m_numAgents; ++node)
         {
             if (inTree[node] || !isUsable(node))
             {
@@ -291,7 +285,7 @@ EasyMeshSimulation::BuildBackhaulTree()
 
         // Relax: does the newly attached node offer a stronger direct edge
         // to any node still outside the tree?
-        for (uint32_t node = 0; node < NUM_AGENT; ++node)
+        for (uint32_t node = 0; node < m_numAgents; ++node)
         {
             if (inTree[node] || !isUsable(node))
             {
@@ -338,7 +332,7 @@ EasyMeshSimulation::FindFronthaulLinkForClient(uint32_t clientId) const
 void
 EasyMeshSimulation::RefreshBackhaulLinks()
 {
-    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
     {
         auto link = FindBackhaulLinkForAgent(agentId);
         if (!link)
@@ -371,7 +365,7 @@ EasyMeshSimulation::RefreshBackhaulLinks()
 uint32_t
 EasyMeshSimulation::FindAgentForFronthaulBssid(Mac48Address bssid) const
 {
-    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
     {
         auto wifiDevice = DynamicCast<WifiNetDevice>(m_agentFronthaulDevices[agentId]);
         if (wifiDevice && wifiDevice->GetMac()->GetAddress() == bssid)
@@ -380,13 +374,13 @@ EasyMeshSimulation::FindAgentForFronthaulBssid(Mac48Address bssid) const
         }
     }
 
-    return NUM_AGENT;
+    return m_numAgents;
 }
 
 void
 EasyMeshSimulation::UpdateClientAssociation(uint32_t clientId, uint32_t agentId)
 {
-    NS_ABORT_MSG_IF(agentId >= NUM_AGENT, "Invalid fronthaul agent selected for client");
+    NS_ABORT_MSG_IF(agentId >= m_numAgents, "Invalid fronthaul agent selected for client");
 
     const uint32_t previousAgent = m_clientToAgent[clientId];
     if (previousAgent != agentId && previousAgent < m_agents.size())
@@ -448,7 +442,7 @@ EasyMeshSimulation::RebuildClientRoutes()
     };
 
     auto controllerRouting = clearRoutes(m_controllerNode.Get(0), false);
-    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
     {
         clearRoutes(m_agentNodes.Get(agentId), false);
     }
@@ -457,7 +451,7 @@ EasyMeshSimulation::RebuildClientRoutes()
     {
         auto clientRouting = clearRoutes(m_clientNodes.Get(clientId), true);
         const uint32_t agentId = m_clientToAgent[clientId];
-        if (agentId >= NUM_AGENT || m_clientIp[clientId] == Ipv4Address::GetAny())
+        if (agentId >= m_numAgents || m_clientIp[clientId] == Ipv4Address::GetAny())
         {
             continue;
         }
@@ -499,7 +493,7 @@ EasyMeshSimulation::SyncClientAssociations()
         }
 
         const uint32_t selectedAgent = FindAgentForFronthaulBssid(staMac->GetBssid(0));
-        if (selectedAgent >= NUM_AGENT)
+        if (selectedAgent >= m_numAgents)
         {
             NS_LOG_WARN("STA" << clientId << " associated to unknown BSSID " << staMac->GetBssid(0));
             continue;
@@ -527,10 +521,10 @@ EasyMeshSimulation::SelectBestUplinkAgent(uint32_t clientId) const
     Ptr<MobilityModel> clientMobility = m_clientNodes.Get(clientId)->GetObject<MobilityModel>();
     Vector clientPosition = clientMobility->GetPosition();
 
-    uint32_t bestAgent = NUM_AGENT;
+    uint32_t bestAgent = m_numAgents;
     double bestScore = -std::numeric_limits<double>::infinity();
 
-    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
     {
         if (!IsAgentOnline(agentId))
         {
@@ -558,12 +552,12 @@ EasyMeshSimulation::SelectBestUplinkAgent(uint32_t clientId) const
         }
     }
 
-    if (bestAgent < NUM_AGENT)
+    if (bestAgent < m_numAgents)
     {
         return bestAgent;
     }
 
-    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
     {
         if (IsAgentOnline(agentId))
         {
@@ -578,9 +572,9 @@ void
 EasyMeshSimulation::CreateNodes()
 {
     m_controllerNode.Create(NUM_CONTROLLER);
-    m_agentNodes.Create(NUM_AGENT);
+    m_agentNodes.Create(m_numAgents);
     m_clientNodes.Create(m_numClients);
-    NS_LOG_INFO("Nodes: " << NUM_CONTROLLER << " controller + "<< NUM_AGENT << " agents + " << m_numClients << " clients");
+    NS_LOG_INFO("Nodes: " << NUM_CONTROLLER << " controller + "<< m_numAgents << " agents + " << m_numClients << " clients");
 }
 
 void 
@@ -600,7 +594,7 @@ EasyMeshSimulation::InstallMobility()
 
     // Agents – optimized after random placement
     Ptr<ListPositionAllocator> aa = CreateObject<ListPositionAllocator>();
-    for (int i = 0; i < NUM_AGENT; i++) 
+    for (uint32_t i = 0; i < m_numAgents; i++) 
         aa->Add(m_agentPositions[i]);
     mob.SetPositionAllocator(aa);
     mob.Install(m_agentNodes);
@@ -648,7 +642,7 @@ EasyMeshSimulation::CreateBackhaulLinks()
 
     Time beaconInterval = MicroSeconds(WIFI_BEACON_INTERVAL_US);
 
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         Ptr<Node> parentNode = (m_agentParent[a] < 0) ? m_controllerNode.Get(0)
                                                       : m_agentNodes.Get(m_agentParent[a]);
@@ -714,7 +708,7 @@ EasyMeshSimulation::HandleAgentOffline()
     std::vector<uint32_t> newlyOffline;
     for (uint32_t agentId : m_offlineAgentIds)
     {
-        if (agentId >= NUM_AGENT)
+        if (agentId >= m_numAgents)
         {
             NS_LOG_WARN("Ignoring offline event: invalid agent id " << agentId);
             continue;
@@ -755,7 +749,7 @@ EasyMeshSimulation::HandleAgentOffline()
     BuildBackhaulTree();
     RefreshBackhaulLinks();
 
-    for (uint32_t agentId = 0; agentId < NUM_AGENT; ++agentId)
+    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
     {
         if (!IsAgentOnline(agentId) || previousParents[agentId] == m_agentParent[agentId])
         {
@@ -790,7 +784,7 @@ EasyMeshSimulation::HandleAgentOffline()
     {
         const auto currentAgent = m_clientToAgent[clientId];
         const auto newAgent = SelectBestUplinkAgent(clientId);
-        if (newAgent >= NUM_AGENT || newAgent == currentAgent)
+        if (newAgent >= m_numAgents || newAgent == currentAgent)
         {
             continue;
         }
@@ -827,10 +821,10 @@ EasyMeshSimulation::CreateFronthaulLinks()
 
     WifiMacHelper fhMac;
     Time beaconInterval = MicroSeconds(WIFI_BEACON_INTERVAL_US);
-    uint32_t linkId = NUM_AGENT;
+    uint32_t linkId = m_numAgents;
     const Ssid fronthaulSsid("EasyMesh-Fronthaul");
 
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         fhMac.SetType("ns3::ApWifiMac",
                       "Ssid", SsidValue(fronthaulSsid),
@@ -884,7 +878,7 @@ EasyMeshSimulation::BuildTopology()
     // Logical EasyMesh objects
     m_controller = Create<EasyMeshController>(0, m_controllerNode.Get(0));
 
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         auto agent = Create<EasyMeshAgent>(a,
                                            m_agentNodes.Get(a),
@@ -956,10 +950,10 @@ EasyMeshSimulation::InstallProtocolStack()
     Ipv4AddressHelper addr;
     Ipv4StaticRoutingHelper staticRoutingHelper;
 
-    std::vector<Ipv4Address> parentBhIp(NUM_AGENT, Ipv4Address::GetAny());
-    std::vector<std::vector<uint32_t>> children(NUM_AGENT);
+    std::vector<Ipv4Address> parentBhIp(m_numAgents, Ipv4Address::GetAny());
+    std::vector<std::vector<uint32_t>> children(m_numAgents);
 
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         if (m_agentParent[a] >= 0)
         {
@@ -967,7 +961,7 @@ EasyMeshSimulation::InstallProtocolStack()
         }
     }
 
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         NetDeviceContainer backhaulPair;
         backhaulPair.Add(m_backhaulDevices.Get(2 * a));
@@ -994,13 +988,13 @@ EasyMeshSimulation::InstallProtocolStack()
         m_controllerIp = parentBhIp[0];
     }
 
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         m_controllerBackhaulIp[a] = m_controllerIp;
     }
 
     NetDeviceContainer fronthaulGroup;
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         fronthaulGroup.Add(m_agentFronthaulDevices[a]);
     }
@@ -1011,19 +1005,19 @@ EasyMeshSimulation::InstallProtocolStack()
 
     addr.SetBase("10.2.0.0", "255.255.255.0");
     Ipv4InterfaceContainer ifFh = addr.Assign(fronthaulGroup);
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         m_agentFronthaulIp[a] = ifFh.GetAddress(a);
         m_agentFronthaulIfIndex[a] = ifFh.Get(a).second;
     }
     for (uint32_t c = 0; c < m_numClients; ++c)
     {
-        m_clientIp[c] = ifFh.GetAddress(NUM_AGENT + c);
-        m_clientFronthaulIfIndex[c] = ifFh.Get(NUM_AGENT + c).second;
+        m_clientIp[c] = ifFh.GetAddress(m_numAgents + c);
+        m_clientFronthaulIfIndex[c] = ifFh.Get(m_numAgents + c).second;
     }
 
     auto ctrlRouting = staticRoutingHelper.GetStaticRouting(m_controllerNode.Get(0)->GetObject<Ipv4>());
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         auto agentIpv4 = m_agentNodes.Get(a)->GetObject<Ipv4>();
         agentIpv4->SetForwarding(m_agentBackhaulIfIndex[a], true);
@@ -1138,7 +1132,7 @@ EasyMeshSimulation::UpdateAnimationNodes(AnimationInterface* anim)
     anim->UpdateNodeColor(m_controllerNode.Get(0), 0, 102, 204);
     anim->UpdateNodeSize(m_controllerNode.Get(0), 2.0, 2.0);
 
-    for (uint32_t a = 0; a < NUM_AGENT; ++a)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
         std::ostringstream name;
         if (!IsAgentOnline(a))
@@ -1166,7 +1160,7 @@ EasyMeshSimulation::UpdateAnimationNodes(AnimationInterface* anim)
     for (uint32_t c = 0; c < m_numClients; ++c)
     {
         std::ostringstream name;
-        if (m_clientToAgent[c] < NUM_AGENT)
+        if (m_clientToAgent[c] < m_numAgents)
         {
             name << "STA " << c << " -> A" << m_clientToAgent[c];
         }
@@ -1191,7 +1185,7 @@ EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
         if (link->GetType() == LinkType::BACKHAUL)
         {
             uint32_t childAgent = 0;
-            for (; childAgent < NUM_AGENT; ++childAgent)
+            for (; childAgent < m_numAgents; ++childAgent)
             {
                 if (m_agentNodes.Get(childAgent) == link->GetDst())
                 {
@@ -1206,7 +1200,7 @@ EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
             else
             {
                 uint32_t parentAgent = 0;
-                for (; parentAgent < NUM_AGENT; ++parentAgent)
+                for (; parentAgent < m_numAgents; ++parentAgent)
                 {
                     if (m_agentNodes.Get(parentAgent) == link->GetSrc())
                     {
@@ -1220,7 +1214,7 @@ EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
         {
             uint32_t agentId = 0;
             uint32_t clientId = 0;
-            for (; agentId < NUM_AGENT; ++agentId)
+            for (; agentId < m_numAgents; ++agentId)
             {
                 if (m_agentNodes.Get(agentId) == link->GetSrc())
                 {
@@ -1333,6 +1327,7 @@ int main(int argc, char* argv[])
     double   duration   = DURATION;
     uint32_t scenarioRuns = SCENARIO_RUNS;
     uint32_t numClients = NUM_STA;          
+    uint32_t numAgents  = NUM_AGENT;
     std::string offlineAgentsStr = std::to_string(OFFLINE_AGENT_ID); // comma-separated, e.g. "1,3,5"
     double   offlineTime = OFFLINE_TIME;
     bool     pcap       = false;
@@ -1342,6 +1337,7 @@ int main(int argc, char* argv[])
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("scenarios", "Number of randomized scenario runs", scenarioRuns);
     cmd.AddValue("clients",  "Number of STA clients",   numClients);
+    cmd.AddValue("agents",   "Number of Agents (APs)",  numAgents);
     cmd.AddValue("offlineAgents", "Comma-separated agent ids to take offline during the run (e.g. 1,3,5)", offlineAgentsStr);
     cmd.AddValue("offlineTime", "Time in seconds when the agent(s) go offline", offlineTime);
     cmd.AddValue("pcap",     "Enable PCAP capture",     pcap);
@@ -1397,6 +1393,7 @@ int main(int argc, char* argv[])
         sim.SetDuration(duration);
         sim.SetScenarioRun(run);
         sim.SetNumClients(numClients);
+        sim.SetNumAgents(numAgents);
         sim.SetOfflineAgentIds(offlineAgentIds);
         sim.SetOfflineTime(offlineTime);
         sim.EnablePcap(pcap);

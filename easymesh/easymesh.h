@@ -58,6 +58,20 @@ public:
         m_clientFronthaulDevices.resize(n);
         m_clientFronthaulIfIndex.resize(n, 0);
     }
+    void SetNumAgents(uint32_t n)
+    {
+        m_numAgents = n;
+        m_controllerBackhaulIp.resize(n, Ipv4Address::GetAny());
+        m_agentIp.resize(n, Ipv4Address::GetAny());
+        m_agentFronthaulIp.resize(n, Ipv4Address::GetAny());
+        m_agentFronthaulDevices.resize(n);
+        m_parentIfIndex.resize(n, 0);
+        m_agentBackhaulIfIndex.resize(n, 0);
+        m_agentFronthaulIfIndex.resize(n, 0);
+        m_agentPositions.resize(n, CONTROLLER_POS);
+        m_agentParent.resize(n, -1);
+        m_agentOnline.resize(n, true);
+    }
     void EnablePcap(bool e)      { m_pcap       = e; }
     void SetMstMetric(MstMetric m) { m_mstMetric = m; }
 
@@ -146,6 +160,7 @@ private:
     // ── Config ────────────────────────────────────────────────
     double   m_duration   = DURATION;
     uint32_t m_numClients = NUM_STA;
+    uint32_t m_numAgents  = NUM_AGENT;
     uint32_t m_scenarioRun = 1;
     std::vector<uint32_t> m_offlineAgentIds = { OFFLINE_AGENT_ID };
     double   m_offlineTime = OFFLINE_TIME;
@@ -154,7 +169,6 @@ private:
     AnimationInterface* m_animation = nullptr;
 
     // ── Static topology ───────────────────────────────────────
-    static const Vector AGENT_POSITIONS[NUM_AGENT];
     static const Vector CONTROLLER_POS;
 };
 
