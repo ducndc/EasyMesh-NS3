@@ -46,9 +46,11 @@
 // (PhyEntity/HePhy::SwitchMaybeToCcaBusy) resets CCA to IDLE when an
 // undecodable adjacent-channel PPDU arrives while another PPDU's preamble /
 // PHY header is being received below the ED threshold, which then trips
-// NS_ASSERT(!m_currentEvent) in PhyEntity::StartReceivePreamble. Using the
-// preamble-detection floor (-82 dBm) keeps CCA busy for any PPDU in reception.
-#define CCA_ED_THRESHOLD_DBM    -82.0
+// NS_ASSERT(!m_currentEvent) in PhyEntity::StartReceivePreamble. Preamble
+// detection triggers at -82 dBm over the whole PPDU width, while CCA-ED looks
+// at the primary 20 MHz only (-3 dB for a 40 MHz PPDU), so the threshold sits
+// below -85 dBm to keep CCA busy for any PPDU in reception.
+#define CCA_ED_THRESHOLD_DBM    -88.0
 // Log-distance path loss (exponent 3) at 1 m reference per band
 #define PATHLOSS_EXPONENT       3.0
 #define REF_LOSS_2_4GHZ_DB      40.05   // 2.437 GHz
