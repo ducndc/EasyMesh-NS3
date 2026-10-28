@@ -2,31 +2,36 @@
 #define EASYMESH_CONTROLLER_H
 
 #include "easymesh-agent.h"
-#include "traffic-stats.h"
+#include "channel-planner.h"
+#include <functional>
+#include <map>
+#include <optional>
 #include <vector>
 #include <string>
 
-// ── Steering event record ────────────────────────────────────────
-enum class SteeringReason { RSSI_LOW, LOAD_BALANCE, CHAN_UTIL };
-
+// ── BSS transition record (client steering / roaming / backhaul) ──
 struct SteeringEvent {
-    double       timeS;
-    uint32_t     clientId;
-    uint32_t     fromAgent;
-    uint32_t     toAgent;
+    double         timeS;
+    bool           isBackhaul;      // true: Agent backhaul STA, false: client STA
+    uint32_t       staId;           // client id, or agent id for backhaul
+    int32_t        fromAgent;       // -1 = Controller (backhaul) / none
+    EmBand         fromBand;
+    int32_t        toAgent;
+    EmBand         toBand;
     SteeringReason reason;
-    double       rssiBeforeDbm;
-    double       rssiAfterDbm;
-    bool         success;
+    double         rssiBeforeDbm;
+    double         rssiAfterDbm;
+    bool           success;
+    double         latencyMs;       // steering command → (re)association complete
+};
 
-    std::string ReasonStr() const {
-        switch (reason) {
-            case SteeringReason::RSSI_LOW:      return "RSSI_LOW";
-            case SteeringReason::LOAD_BALANCE:  return "LOAD_BAL";
-            case SteeringReason::CHAN_UTIL:      return "CHAN_UTIL";
-            default:                            return "UNKNOWN";
-        }
-    }
+// ── Hooks into the simulation (how the controller observes / acts) ──
+struct ControllerOps {
+    std::function<double(uint32_t clientId, Ptr<EasyMeshRadio> radio)> clientRssi;
+    std::function<double(Ptr<EasyMeshRadio> a, Ptr<EasyMeshRadio> b)>  radioRssi;
+    std::function<double(double rssiDbm, uint16_t widthMhz)>          phyRate;
+    std::function<bool(uint32_t clientId, Ptr<EasyMeshRadio> target, SteeringReason reason)> steerClient;
+    std::function<void(Ptr<EasyMeshRadio> radio, const EmChannel& channel)> switchChannel;
 };
 
 // ── Controller class ─────────────────────────────────────────────
@@ -34,44 +39,73 @@ class EasyMeshController : public SimpleRefCount<EasyMeshController> {
 public:
     EasyMeshController(uint32_t id, Ptr<Node> node);
 
+    void SetOps(const ControllerOps& ops) { m_ops = ops; }
+    void SetNumClients(uint32_t n)        { m_clients.resize(n); }
+    void EnableSteering(bool e)           { m_steering = e; }
+    void EnableLoadBalancing(bool e)      { m_loadBalancing = e; }
+
     // Agent registry
     void RegisterAgent(Ptr<EasyMeshAgent> agent);
-    Ptr<EasyMeshAgent> GetAgent(uint32_t agentId);
+    Ptr<EasyMeshAgent> GetAgent(uint32_t agentId) const;
     const std::vector<Ptr<EasyMeshAgent>>& GetAgents() const { return m_agents; }
 
-    // Link registry
-    void RegisterLink(Ptr<EasyMeshLink> link);
-    const std::vector<Ptr<EasyMeshLink>>& GetLinks() const { return m_links; }
+    // ── Topology database (fed by Agent notifications) ──────────
+    void NotifyClientAssociated(uint32_t clientId, Ptr<EasyMeshRadio> radio);
+    void NotifyClientDisassociated(uint32_t clientId);
+    void NotifyTransitionStarted(uint32_t clientId);
+    void RecordTransition(const SteeringEvent& ev);
+    bool IsTransitionAllowed(uint32_t clientId) const;
+    Ptr<EasyMeshRadio> GetServingRadio(uint32_t clientId) const;
 
-    // Periodic MAP tasks (scheduled by Simulation)
+    // Best fronthaul BSS for a client (capacity-, load- and backhaul-aware)
+    Ptr<EasyMeshRadio> SelectBestRadio(uint32_t clientId,
+                                       Ptr<EasyMeshRadio> exclude,
+                                       std::optional<EmBand> band,
+                                       double minRssiDbm) const;
+
+    // ── Periodic MAP tasks (scheduled by Simulation) ────────────
     void CollectApMetrics();
     void RunSteeringEngine();
-    void OptimizeBackhaulTopology();
-
-    // Called after simulation ends to inject FlowMonitor results
-    void ApplyTrafficStats(const TrafficStats& ts);
+    // initial: plan before start (applied directly); otherwise re-plan with
+    // measured utilization and switch radios through ops.switchChannel
+    void PlanChannels(bool initial);
+    void RecordInitialChannels();   // snapshot used by PrintChannelPlan
+    void HandleAgentOffline(uint32_t agentId);
 
     // Print helpers
-    void PrintTopology()        const;
-    void PrintSteeringLog()     const;
-    void PrintAgentTraffic()    const;
+    void PrintTopology()                    const;
+    void PrintChannelPlan()                 const;
+    void PrintSteeringLog()                 const;
+    void PrintRadioTraffic(double activeS)  const;
 
 private:
+    struct ClientRecord {
+        Ptr<EasyMeshRadio> radio;
+        bool   associated     = false;
+        bool   pending        = false;
+        double lastTransition = -1e9;
+    };
+
+    std::vector<Ptr<EasyMeshRadio>> OnlineRadios() const;
+    double RadioScore(uint32_t clientId, Ptr<EasyMeshRadio> radio) const;
+    double Interference(Ptr<EasyMeshRadio> a, Ptr<EasyMeshRadio> b) const;
+    bool   Steer(uint32_t clientId, Ptr<EasyMeshRadio> target, SteeringReason reason);
+    void   RunLoadBalancing();
+
     uint32_t  m_id;
     Ptr<Node> m_node;
+    ControllerOps m_ops;
+    bool m_steering      = true;
+    bool m_loadBalancing = true;
 
     std::vector<Ptr<EasyMeshAgent>> m_agents;
-    std::vector<Ptr<EasyMeshLink>>  m_links;
+    std::vector<ClientRecord>       m_clients;
     std::vector<SteeringEvent>      m_steeringLog;
 
-    // Thresholds
-    static constexpr double RSSI_STEER_THRESHOLD  = -75.0;
-    static constexpr double LOAD_STEER_THRESHOLD  = 0.75;
-    static constexpr double UTIL_STEER_THRESHOLD  = 0.80;
-
-    // Internal helpers
-    double  EstimateRssi(Ptr<EasyMeshAgent> agent) const;
-    uint32_t SelectTargetAgent(uint32_t excludeId) const;
+    ChannelPlanner                       m_planner;
+    std::map<const EasyMeshRadio*, uint16_t> m_initialChannel;
+    double m_initialPlanCost = 0.0;
+    uint32_t m_planRounds    = 0;
 };
 
 #endif // EASYMESH_CONTROLLER_H

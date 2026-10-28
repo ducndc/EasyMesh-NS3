@@ -1,41 +1,55 @@
 #include "easymesh.h"
+
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <iomanip>
 #include <limits>
 #include <numeric>
 #include <sstream>
-#include <stdexcept>
-
-using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("EasyMeshSim");
 
 const Vector EasyMeshSimulation::CONTROLLER_POS   = Vector(0.0, 0.0, 1.5);
 
-EasyMeshSimulation::EasyMeshSimulation()  
+static const EmChannel kBackhaulChannel{BACKHAUL_CHANNEL_NUMBER, BACKHAUL_WIDTH_MHZ, EmBand::BAND_5GHZ};
+static const EmChannel kParkingChannel{PARKING_CHANNEL_NUMBER, PARKING_WIDTH_MHZ, EmBand::BAND_5GHZ};
+
+EasyMeshSimulation::EasyMeshSimulation()
 {
-    m_controllerIp = Ipv4Address::GetAny();
-    m_controllerBackhaulIp.resize(NUM_AGENT, Ipv4Address::GetAny());
-    m_agentIp.resize(NUM_AGENT, Ipv4Address::GetAny()); 
-    m_agentFronthaulIp.resize(NUM_AGENT, Ipv4Address::GetAny());
-    m_clientIp.resize(NUM_STA, Ipv4Address::GetAny());
-    m_clientToAgent.resize(NUM_STA, 0);
-    m_agentFronthaulDevices.resize(NUM_AGENT);
-    m_clientFronthaulDevices.resize(NUM_STA);
-    m_parentIfIndex.resize(NUM_AGENT, 0);
-    m_agentBackhaulIfIndex.resize(NUM_AGENT, 0);
-    m_agentFronthaulIfIndex.resize(NUM_AGENT, 0);
-    m_clientFronthaulIfIndex.resize(NUM_STA, 0);
-    m_agentPositions.resize(NUM_AGENT, CONTROLLER_POS);
-    m_agentParent.resize(NUM_AGENT, -1);
-    m_agentOnline.resize(NUM_AGENT, true);
+    SetNumAgents(NUM_AGENT);
+    SetNumClients(NUM_STA);
 }
 
 EasyMeshSimulation::~EasyMeshSimulation() {}
 
-double 
+void
+EasyMeshSimulation::SetNumAgents(uint32_t n)
+{
+    m_numAgents = n;
+    m_agentBap.resize(n);
+    m_agentBapIp.resize(n, Ipv4Address::GetAny());
+    m_agentBapIf.resize(n, 0);
+    m_agentBstaIp.resize(n, Ipv4Address::GetAny());
+    m_agentBstaIf.resize(n, 0);
+    m_agentPositions.resize(n, CONTROLLER_POS);
+    m_agentParent.resize(n, -1);
+    m_plannedParent.resize(n, -1);
+    m_agentOnline.resize(n, true);
+}
+
+void
+EasyMeshSimulation::SetNumClients(uint32_t n)
+{
+    m_numClients = n;
+    m_clientIp.resize(n, Ipv4Address::GetAny());
+    m_clientIf.resize(n, 0);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Radio estimates
+// ════════════════════════════════════════════════════════════════
+
+double
 EasyMeshSimulation::ComputeDistance(Vector a, Vector b) const
 {
     return std::sqrt(std::pow(a.x-b.x,2) +
@@ -44,18 +58,55 @@ EasyMeshSimulation::ComputeDistance(Vector a, Vector b) const
 }
 
 double
-EasyMeshSimulation::EstimateLinkRssi(Vector a, Vector b) const
+EasyMeshSimulation::EstimateRssi(Vector a, Vector b, EmBand band) const
 {
-    double dist = ComputeDistance(a, b);
-    double pathLoss = 40.0 + 30.0 * std::log10(std::max(1.0, dist));
-    return 20.0 + 6.0 - pathLoss;
+    // Same log-distance model the spectrum channels use, so the Controller's
+    // estimates match what the PHYs actually receive.
+    const double refLoss = (band == EmBand::BAND_2_4GHZ) ? REF_LOSS_2_4GHZ_DB : REF_LOSS_5GHZ_DB;
+    const double dist = std::max(1.0, ComputeDistance(a, b));
+    return TX_POWER_DBM - (refLoss + 10.0 * PATHLOSS_EXPONENT * std::log10(dist));
 }
 
 double
-EasyMeshSimulation::EstimateLinkThroughput(double rssi) const
+EasyMeshSimulation::ClientRssi(uint32_t clientId, Ptr<EasyMeshRadio> radio) const
 {
-    uint32_t mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
-    return (mcs + 1) * 5.5;
+    return EstimateRssi(GetClientPosition(clientId), GetAgentPosition(radio->GetAgentId()),
+                        radio->GetBand());
+}
+
+double
+EasyMeshSimulation::RadioRssi(Ptr<EasyMeshRadio> a, Ptr<EasyMeshRadio> b) const
+{
+    return EstimateRssi(GetAgentPosition(a->GetAgentId()), GetAgentPosition(b->GetAgentId()),
+                        a->GetBand());
+}
+
+uint32_t
+EasyMeshSimulation::RssiToMcs(double rssiDbm, uint16_t widthMhz)
+{
+    // HE minimum-sensitivity style thresholds for 20 MHz; a wider channel
+    // spreads the same power over more noise (-3 dB per doubling).
+    static const double kThreshold20[] = {-82, -79, -77, -74, -70, -66, -65, -64, -59, -57, -54, -52};
+    const double effective = rssiDbm - 10.0 * std::log10(widthMhz / 20.0);
+    uint32_t mcs = 0;
+    for (uint32_t m = 0; m < 12; ++m)
+    {
+        if (effective >= kThreshold20[m]) mcs = m;
+    }
+    return mcs;
+}
+
+double
+EasyMeshSimulation::PhyRateMbps(double rssiDbm, uint16_t widthMhz)
+{
+    // 1 spatial stream, 0.8 us GI, 20 MHz HE rates scaled by width
+    static const double kRate20[] = {8.6, 17.2, 25.8, 34.4, 51.6, 68.8, 77.4, 86.0, 103.2, 114.7, 129.0, 143.4};
+    const double effective = rssiDbm - 10.0 * std::log10(widthMhz / 20.0);
+    if (effective < -82.0)
+    {
+        return 0.0;
+    }
+    return kRate20[RssiToMcs(rssiDbm, widthMhz)] * (widthMhz / 20.0);
 }
 
 Vector
@@ -72,11 +123,28 @@ EasyMeshSimulation::GetAgentPosition(uint32_t agentId) const
     return m_agentPositions.at(agentId);
 }
 
+Vector
+EasyMeshSimulation::GetClientPosition(uint32_t clientId) const
+{
+    return m_clientNodes.Get(clientId)->GetObject<MobilityModel>()->GetPosition();
+}
+
 bool
 EasyMeshSimulation::IsAgentOnline(uint32_t agentId) const
 {
     return agentId < m_agentOnline.size() && m_agentOnline[agentId];
 }
+
+Mac48Address
+EasyMeshSimulation::BackhaulBssid(int32_t parent) const
+{
+    return (parent < 0) ? m_ctrlBap->GetMac()->GetAddress()
+                        : m_agentBap[parent]->GetMac()->GetAddress();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Agent placement
+// ════════════════════════════════════════════════════════════════
 
 void
 EasyMeshSimulation::GenerateRandomAgentPositions()
@@ -173,73 +241,64 @@ EasyMeshSimulation::OptimizeNetworkTopology()
     }
 }
 
-void
-EasyMeshSimulation::BuildBackhaulTree()
+// ════════════════════════════════════════════════════════════════
+//  Backhaul tree (network optimization)
+// ════════════════════════════════════════════════════════════════
+
+double
+EasyMeshSimulation::EdgeWeight(Vector a, Vector b) const
+{
+    const auto rssi = EstimateRssi(a, b, EmBand::BAND_5GHZ);
+    return (m_mstMetric == MstMetric::RSSI) ? rssi : PhyRateMbps(rssi, BACKHAUL_WIDTH_MHZ);
+}
+
+std::vector<int32_t>
+EasyMeshSimulation::ComputeBackhaulTree() const
 {
     // ── Prim's Maximum-Spanning-Tree algorithm ─────────────────
-    // Selects, for every agent, the best possible uplink AP (either
+    // Selects, for every online agent, the best possible uplink AP (either
     // the Controller or another already-connected agent). The edge
     // weight is pluggable via m_mstMetric:
     //   • MstMetric::THROUGHPUT — maximizes total achievable Wi-Fi
     //     throughput (Mbps) across the whole backhaul mesh.
     //   • MstMetric::RSSI       — maximizes total/weakest-link signal
     //     strength (dBm) across the mesh, ignoring MCS/throughput.
-    // Both runs use the exact same Prim's procedure below; only the
-    // per-edge weight() lambda differs, so the two cases can be
-    // compared head-to-head by flipping m_mstMetric via SetMstMetric()
-    // or the --mstMetric CLI flag in main().
     //
     // Graph: kNodeCount = m_numAgents + 1 nodes — index [0, m_numAgents)
     // are agents, index m_numAgents is a virtual node for the Controller
     // (the MST root).
     //
     // This is the textbook Prim's MST procedure with weights maximized
-    // instead of minimized (equivalent to running classic Prim's on
-    // negated weights): starting from the root, repeatedly attach the
-    // outside node reachable by the single strongest direct edge from
-    // any node already in the tree. That per-step optimality is what
-    // gives an MST its global guarantee — unlike a fixed processing
-    // order (nearest-to-controller first), which can lock in a parent
-    // before a stronger link from a not-yet-visited agent is ever
-    // considered. Complexity is O(m_numAgents^2), negligible for
-    // mesh-sized deployments.
-    m_agentParent.assign(m_numAgents, -1);
+    // instead of minimized: starting from the root, repeatedly attach the
+    // outside node reachable by the single strongest direct edge from any
+    // node already in the tree. Complexity is O(m_numAgents^2).
+    std::vector<int32_t> parent(m_numAgents, -1);
 
     const uint32_t kControllerNode = m_numAgents;   // virtual root index
     const uint32_t kNodeCount      = m_numAgents + 1;
 
     auto positionOf = [this, kControllerNode](uint32_t node) -> Vector {
-        return (node == kControllerNode) ? CONTROLLER_POS : m_agentPositions[node];
-    };
-    auto isUsable = [this, kControllerNode](uint32_t node) -> bool {
-        return node == kControllerNode || IsAgentOnline(node);
+        return (node == kControllerNode) ? CONTROLLER_POS : GetAgentPosition(node);
     };
 
     const bool useRssi = (m_mstMetric == MstMetric::RSSI);
     const char* metricUnit  = useRssi ? "dBm"  : "Mbps";
     const char* metricLabel = useRssi ? "RSSI" : "capacity";
 
-    // Edge weight in "higher is better" form for whichever metric is active.
-    auto edgeWeight = [this, useRssi](Vector a, Vector b) -> double {
-        const auto rssi = EstimateLinkRssi(a, b);
-        return useRssi ? rssi : EstimateLinkThroughput(rssi);
-    };
-
     std::vector<bool>    inTree(kNodeCount, false);
     std::vector<double>  bestWeight(kNodeCount, -std::numeric_limits<double>::infinity());
-                                                            // best direct-edge weight to the tree so far
-    std::vector<int32_t> bestParent(kNodeCount, -1);       // candidate parent achieving that weight
+    std::vector<int32_t> bestParent(kNodeCount, -1);
 
     inTree[kControllerNode] = true;
 
     // Seed frontier with direct Controller→Agent edges.
     for (uint32_t node = 0; node < m_numAgents; ++node)
     {
-        if (!isUsable(node))
+        if (!IsAgentOnline(node))
         {
             continue;
         }
-        bestWeight[node] = edgeWeight(CONTROLLER_POS, positionOf(node));
+        bestWeight[node] = EdgeWeight(CONTROLLER_POS, positionOf(node));
         bestParent[node] = static_cast<int32_t>(kControllerNode);
     }
 
@@ -250,7 +309,7 @@ EasyMeshSimulation::BuildBackhaulTree()
         double  chosenWeight = -std::numeric_limits<double>::infinity();
         for (uint32_t node = 0; node < m_numAgents; ++node)
         {
-            if (inTree[node] || !isUsable(node))
+            if (inTree[node] || !IsAgentOnline(node))
             {
                 continue;
             }
@@ -267,32 +326,25 @@ EasyMeshSimulation::BuildBackhaulTree()
         }
 
         inTree[chosen] = true;
-        m_agentParent[chosen] = (bestParent[chosen] == static_cast<int32_t>(kControllerNode))
-                                 ? -1
-                                 : bestParent[chosen];
+        parent[chosen] = (bestParent[chosen] == static_cast<int32_t>(kControllerNode))
+                             ? -1
+                             : bestParent[chosen];
 
-        if (m_agentParent[chosen] < 0)
-        {
-            NS_LOG_INFO("MST(" << metricLabel << "): Backhaul parent for Agent" << chosen
-                        << " is Controller  (" << metricLabel << "=" << chosenWeight << metricUnit << ")");
-        }
-        else
-        {
-            NS_LOG_INFO("MST(" << metricLabel << "): Backhaul parent for Agent" << chosen
-                        << " is Agent" << m_agentParent[chosen]
-                        << "  (" << metricLabel << "=" << chosenWeight << metricUnit << ")");
-        }
+        NS_LOG_DEBUG("MST(" << metricLabel << "): Backhaul parent for Agent" << chosen << " is "
+                     << (parent[chosen] < 0 ? std::string("Controller")
+                                            : "Agent" + std::to_string(parent[chosen]))
+                     << "  (" << metricLabel << "=" << chosenWeight << metricUnit << ")");
 
         // Relax: does the newly attached node offer a stronger direct edge
         // to any node still outside the tree?
         for (uint32_t node = 0; node < m_numAgents; ++node)
         {
-            if (inTree[node] || !isUsable(node))
+            if (inTree[node] || !IsAgentOnline(node))
             {
                 continue;
             }
 
-            const auto w = edgeWeight(positionOf(chosen), positionOf(node));
+            const auto w = EdgeWeight(positionOf(chosen), positionOf(node));
 
             if (w > bestWeight[node])
             {
@@ -301,274 +353,102 @@ EasyMeshSimulation::BuildBackhaulTree()
             }
         }
     }
+    return parent;
 }
 
-Ptr<EasyMeshLink>
-EasyMeshSimulation::FindBackhaulLinkForAgent(uint32_t agentId) const
+double
+EasyMeshSimulation::TreeWeight(const std::vector<int32_t>& parents) const
 {
-    for (const auto& link : m_links)
+    double total = 0.0;
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
-        if (link->GetType() == LinkType::BACKHAUL && link->GetDst() == m_agentNodes.Get(agentId))
+        if (!IsAgentOnline(a)) continue;
+        const int32_t p = parents[a];
+        if (p >= 0 && !IsAgentOnline(p))
         {
-            return link;
+            return -std::numeric_limits<double>::infinity();   // orphaned: tree is broken
         }
+        total += EdgeWeight(p < 0 ? CONTROLLER_POS : GetAgentPosition(p), GetAgentPosition(a));
     }
-    return nullptr;
-}
-
-Ptr<EasyMeshLink>
-EasyMeshSimulation::FindFronthaulLinkForClient(uint32_t clientId) const
-{
-    for (const auto& link : m_links)
-    {
-        if (link->GetType() == LinkType::FRONTHAUL && link->GetDst() == m_clientNodes.Get(clientId))
-        {
-            return link;
-        }
-    }
-    return nullptr;
+    return total;
 }
 
 void
-EasyMeshSimulation::RefreshBackhaulLinks()
+EasyMeshSimulation::UpdateBackhaulMetrics()
 {
-    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
-        auto link = FindBackhaulLinkForAgent(agentId);
-        if (!link)
+        // Link object reflects the physical association
+        const int32_t parent = m_agentParent[a];
+        const Vector parentPos = (parent < 0) ? CONTROLLER_POS : GetAgentPosition(parent);
+        const double rssi = EstimateRssi(parentPos, GetAgentPosition(a), EmBand::BAND_5GHZ);
+        auto link = m_agents[a]->GetBackhaulLink();
+        link->SetEndpoints(parent < 0 ? m_controllerNode.Get(0) : m_agentNodes.Get(parent),
+                           m_agentNodes.Get(a));
+        link->UpdateMetrics(rssi, rssi - (-95.0), RssiToMcs(rssi, BACKHAUL_WIDTH_MHZ),
+                            PhyRateMbps(rssi, BACKHAUL_WIDTH_MHZ), 0.0);
+        link->SetActive(IsAgentOnline(a));
+        m_agents[a]->SetParent(parent);
+
+        // Path capacity along the planned tree: all hops share one backhaul
+        // channel, so airtime adds up → C = 1 / Σ(1 / rate_hop).
+        double inverse = 0.0;
+        bool reachable = IsAgentOnline(a);
+        uint32_t current = a;
+        for (uint32_t hops = 0; reachable && hops <= m_numAgents; ++hops)
         {
-            continue;
+            const int32_t p = m_plannedParent[current];
+            const Vector pp = (p < 0) ? CONTROLLER_POS : GetAgentPosition(p);
+            const double rate = PhyRateMbps(EstimateRssi(pp, GetAgentPosition(current), EmBand::BAND_5GHZ),
+                                            BACKHAUL_WIDTH_MHZ);
+            if (rate <= 0.0) { reachable = false; break; }
+            inverse += 1.0 / rate;
+            if (p < 0) break;
+            if (!IsAgentOnline(p) || hops == m_numAgents) { reachable = false; break; }
+            current = p;
         }
-
-        if (!IsAgentOnline(agentId))
-        {
-            link->SetActive(false);
-            continue;
-        }
-
-        Ptr<Node> parentNode = (m_agentParent[agentId] < 0) ? m_controllerNode.Get(0)
-                                                             : m_agentNodes.Get(m_agentParent[agentId]);
-        Vector parentPosition = (m_agentParent[agentId] < 0) ? CONTROLLER_POS
-                                                              : GetAgentPosition(m_agentParent[agentId]);
-        const auto childPosition = GetAgentPosition(agentId);
-        const auto rssi = EstimateLinkRssi(parentPosition, childPosition);
-        const auto snr = rssi - (-95.0);
-        const auto mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
-        const auto throughput = EstimateLinkThroughput(rssi);
-
-        link->SetEndpoints(parentNode, m_agentNodes.Get(agentId));
-        link->UpdateMetrics(rssi, snr, mcs, throughput, 0.0);
-        link->SetActive(true);
-    }
-}
-
-uint32_t
-EasyMeshSimulation::FindAgentForFronthaulBssid(Mac48Address bssid) const
-{
-    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
-    {
-        auto wifiDevice = DynamicCast<WifiNetDevice>(m_agentFronthaulDevices[agentId]);
-        if (wifiDevice && wifiDevice->GetMac()->GetAddress() == bssid)
-        {
-            return agentId;
-        }
-    }
-
-    return m_numAgents;
-}
-
-void
-EasyMeshSimulation::UpdateClientAssociation(uint32_t clientId, uint32_t agentId)
-{
-    NS_ABORT_MSG_IF(agentId >= m_numAgents, "Invalid fronthaul agent selected for client");
-
-    const uint32_t previousAgent = m_clientToAgent[clientId];
-    if (previousAgent != agentId && previousAgent < m_agents.size())
-    {
-        m_agents[previousAgent]->RemoveClient(clientId);
-    }
-
-    if (agentId < m_agents.size())
-    {
-        m_agents[agentId]->AddClient(clientId);
-    }
-
-    auto fronthaulLink = FindFronthaulLinkForClient(clientId);
-    if (fronthaulLink)
-    {
-        if (previousAgent != agentId && previousAgent < m_agents.size())
-        {
-            m_agents[previousAgent]->RemoveFronthaulLink(fronthaulLink);
-        }
-        if (agentId < m_agents.size())
-        {
-            m_agents[agentId]->AddFronthaulLink(fronthaulLink);
-        }
-
-        fronthaulLink->SetEndpoints(m_agentNodes.Get(agentId), m_clientNodes.Get(clientId));
-
-        const auto clientPosition = m_clientNodes.Get(clientId)->GetObject<MobilityModel>()->GetPosition();
-        const auto agentPosition = GetAgentPosition(agentId);
-        const auto rssi = EstimateLinkRssi(agentPosition, clientPosition);
-        const auto snr = rssi - (-95.0);
-        const auto mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
-        const auto throughput = EstimateLinkThroughput(rssi);
-        fronthaulLink->UpdateMetrics(rssi, snr, mcs, throughput, 0.0);
-    }
-
-    m_clientToAgent[clientId] = agentId;
-}
-
-void
-EasyMeshSimulation::RebuildClientRoutes()
-{
-    Ipv4StaticRoutingHelper staticRoutingHelper;
-    const auto isClientHostRoute = [this](const Ipv4RoutingTableEntry& route) {
-        return route.IsHost() &&
-               std::find(m_clientIp.begin(), m_clientIp.end(), route.GetDest()) != m_clientIp.end();
-    };
-
-    auto clearRoutes = [&](Ptr<Node> node, bool clearDefault) {
-        auto routing = staticRoutingHelper.GetStaticRouting(node->GetObject<Ipv4>());
-        for (int32_t index = static_cast<int32_t>(routing->GetNRoutes()) - 1; index >= 0; --index)
-        {
-            const auto route = routing->GetRoute(static_cast<uint32_t>(index));
-            if ((clearDefault && route.IsDefault()) || isClientHostRoute(route))
-            {
-                routing->RemoveRoute(static_cast<uint32_t>(index));
-            }
-        }
-        return routing;
-    };
-
-    auto controllerRouting = clearRoutes(m_controllerNode.Get(0), false);
-    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
-    {
-        clearRoutes(m_agentNodes.Get(agentId), false);
-    }
-
-    for (uint32_t clientId = 0; clientId < m_numClients; ++clientId)
-    {
-        auto clientRouting = clearRoutes(m_clientNodes.Get(clientId), true);
-        const uint32_t agentId = m_clientToAgent[clientId];
-        if (agentId >= m_numAgents || m_clientIp[clientId] == Ipv4Address::GetAny())
-        {
-            continue;
-        }
-
-        clientRouting->SetDefaultRoute(m_agentFronthaulIp[agentId], m_clientFronthaulIfIndex[clientId]);
-
-        uint32_t current = agentId;
-        while (m_agentParent[current] >= 0)
-        {
-            const uint32_t parent = static_cast<uint32_t>(m_agentParent[current]);
-            auto parentRouting = staticRoutingHelper.GetStaticRouting(
-                m_agentNodes.Get(parent)->GetObject<Ipv4>());
-            parentRouting->AddHostRouteTo(m_clientIp[clientId],
-                                          m_agentIp[current],
-                                          m_agentBackhaulIfIndex[parent]);
-            current = parent;
-        }
-
-        controllerRouting->AddHostRouteTo(m_clientIp[clientId],
-                                          m_agentIp[current],
-                                          m_parentIfIndex[current]);
+        m_agents[a]->SetBackhaulCapacity(reachable && inverse > 0 ? 1.0 / inverse : 0.0);
     }
 }
 
 void
-EasyMeshSimulation::SyncClientAssociations()
+EasyMeshSimulation::OptimizeBackhaul(bool force, SteeringReason reason)
 {
-    bool updated = false;
+    const auto tree = ComputeBackhaulTree();
+    const double current = TreeWeight(m_agentParent);
+    const double proposed = TreeWeight(tree);
+    const bool broken = !std::isfinite(current);
 
-    for (uint32_t clientId = 0; clientId < m_numClients; ++clientId)
+    if (!force && !broken && proposed - current <= NETOPT_MIN_GAIN * std::abs(current))
     {
-        auto wifiDevice = DynamicCast<WifiNetDevice>(m_clientFronthaulDevices[clientId]);
-        auto staMac = wifiDevice ? DynamicCast<StaWifiMac>(wifiDevice->GetMac()) : nullptr;
-        if (!staMac || !staMac->IsAssociated())
-        {
-            NS_LOG_WARN("STA" << clientId << " is not associated yet; keeping provisional agent A"
-                        << m_clientToAgent[clientId]);
-            continue;
-        }
-
-        const uint32_t selectedAgent = FindAgentForFronthaulBssid(staMac->GetBssid(0));
-        if (selectedAgent >= m_numAgents)
-        {
-            NS_LOG_WARN("STA" << clientId << " associated to unknown BSSID " << staMac->GetBssid(0));
-            continue;
-        }
-
-        if (selectedAgent != m_clientToAgent[clientId])
-        {
-            NS_LOG_INFO("STA" << clientId << " selected BSS Agent" << selectedAgent
-                        << " instead of provisional Agent" << m_clientToAgent[clientId]);
-        }
-
-        UpdateClientAssociation(clientId, selectedAgent);
-        updated = true;
+        NS_LOG_DEBUG("NETWORK_OPT: current tree kept (" << current << " vs " << proposed << ")");
+        return;
     }
 
-    if (updated)
+    m_plannedParent = tree;
+    UpdateBackhaulMetrics();
+
+    uint32_t changes = 0;
+    for (uint32_t a = 0; a < m_numAgents; ++a)
     {
-        RebuildClientRoutes();
+        if (!IsAgentOnline(a) || tree[a] == m_agentParent[a]) continue;
+        const auto& sta = m_stas[BstaIndex(a)];
+        if (sta.pending && sta.target == BackhaulBssid(tree[a])) continue;
+        ReparentAgent(a, tree[a], reason);
+        changes++;
     }
+
+    NS_LOG_INFO("[Controller t=" << Simulator::Now().GetSeconds() << "] NETWORK_OPT ("
+                << ReasonStr(reason) << "): tree weight "
+                << (broken ? std::string("broken") : std::to_string(current)) << " -> " << proposed
+                << ", " << changes << " backhaul STA(s) re-parented");
 }
 
-uint32_t
-EasyMeshSimulation::SelectBestUplinkAgent(uint32_t clientId) const
-{
-    Ptr<MobilityModel> clientMobility = m_clientNodes.Get(clientId)->GetObject<MobilityModel>();
-    Vector clientPosition = clientMobility->GetPosition();
+// ════════════════════════════════════════════════════════════════
+//  Topology construction
+// ════════════════════════════════════════════════════════════════
 
-    uint32_t bestAgent = m_numAgents;
-    double bestScore = -std::numeric_limits<double>::infinity();
-
-    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
-    {
-        if (!IsAgentOnline(agentId))
-        {
-            continue;
-        }
-
-        const auto fronthaulRssi = EstimateLinkRssi(clientPosition, GetAgentPosition(agentId));
-        const auto fronthaulThroughput = EstimateLinkThroughput(fronthaulRssi);
-
-        auto backhaulLink = FindBackhaulLinkForAgent(agentId);
-        if (backhaulLink && !backhaulLink->IsActive())
-        {
-            continue;
-        }
-        double backhaulThroughput = backhaulLink ? backhaulLink->GetThroughput() : 0.0;
-        double backhaulRssi = backhaulLink ? backhaulLink->GetRssi() : -100.0;
-
-        const double pathCapacity = std::min(fronthaulThroughput, backhaulThroughput);
-        const double score = pathCapacity * 10.0 + fronthaulRssi + 0.5 * backhaulRssi;
-
-        if (score > bestScore)
-        {
-            bestScore = score;
-            bestAgent = agentId;
-        }
-    }
-
-    if (bestAgent < m_numAgents)
-    {
-        return bestAgent;
-    }
-
-    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
-    {
-        if (IsAgentOnline(agentId))
-        {
-            return agentId;
-        }
-    }
-
-    return bestAgent;
-}
-
-void 
+void
 EasyMeshSimulation::CreateNodes()
 {
     m_controllerNode.Create(NUM_CONTROLLER);
@@ -577,7 +457,7 @@ EasyMeshSimulation::CreateNodes()
     NS_LOG_INFO("Nodes: " << NUM_CONTROLLER << " controller + "<< m_numAgents << " agents + " << m_numClients << " clients");
 }
 
-void 
+void
 EasyMeshSimulation::InstallMobility()
 {
     MobilityHelper mob;
@@ -594,106 +474,703 @@ EasyMeshSimulation::InstallMobility()
 
     // Agents – optimized after random placement
     Ptr<ListPositionAllocator> aa = CreateObject<ListPositionAllocator>();
-    for (uint32_t i = 0; i < m_numAgents; i++) 
+    for (uint32_t i = 0; i < m_numAgents; i++)
         aa->Add(m_agentPositions[i]);
     mob.SetPositionAllocator(aa);
     mob.Install(m_agentNodes);
 
-    auto clientX = CreateObject<UniformRandomVariable>();
-    auto clientY = CreateObject<UniformRandomVariable>();
-    clientX->SetAttribute("Min", DoubleValue(TOPOLOGY_AREA_MIN_X));
-    clientX->SetAttribute("Max", DoubleValue(TOPOLOGY_AREA_MAX_X));
-    clientY->SetAttribute("Min", DoubleValue(TOPOLOGY_AREA_MIN_Y));
-    clientY->SetAttribute("Max", DoubleValue(TOPOLOGY_AREA_MAX_Y));
+    // Clients – random start, then RandomWaypoint inside the coverage area
+    std::ostringstream xRange, yRange;
+    xRange << "ns3::UniformRandomVariable[Min=" << TOPOLOGY_AREA_MIN_X << "|Max=" << TOPOLOGY_AREA_MAX_X << "]";
+    yRange << "ns3::UniformRandomVariable[Min=" << TOPOLOGY_AREA_MIN_Y << "|Max=" << TOPOLOGY_AREA_MAX_Y << "]";
+    auto area = CreateObject<RandomRectanglePositionAllocator>();
+    area->SetAttribute("X", StringValue(xRange.str()));
+    area->SetAttribute("Y", StringValue(yRange.str()));
+    area->SetAttribute("Z", DoubleValue(1.0));
 
-    Ptr<ListPositionAllocator> cla = CreateObject<ListPositionAllocator>();
+    MobilityHelper mobClient;
+    mobClient.SetPositionAllocator(area);
+    if (m_staMaxSpeed > 0.0)
+    {
+        std::ostringstream speed, pause;
+        speed << "ns3::UniformRandomVariable[Min=" << std::min(STA_MIN_SPEED, m_staMaxSpeed)
+              << "|Max=" << m_staMaxSpeed << "]";
+        pause << "ns3::UniformRandomVariable[Min=0|Max=" << STA_MAX_PAUSE << "]";
+        mobClient.SetMobilityModel("ns3::RandomWaypointMobilityModel",
+                                   "Speed", StringValue(speed.str()),
+                                   "Pause", StringValue(pause.str()),
+                                   "PositionAllocator", PointerValue(area));
+    }
+    else
+    {
+        mobClient.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    }
+    mobClient.Install(m_clientNodes);
+
     for (uint32_t c = 0; c < m_numClients; ++c)
     {
-        Vector clientPosition(clientX->GetValue(), clientY->GetValue(), 1.0);
-        cla->Add(clientPosition);
-        NS_LOG_INFO("Randomized STA" << c << " position=("
-                    << clientPosition.x << ","
-                    << clientPosition.y << ")");
+        const auto pos = GetClientPosition(c);
+        NS_LOG_INFO("STA" << c << " start position=(" << pos.x << "," << pos.y << ")"
+                    << (m_staMaxSpeed > 0.0 ? "  mobile" : "  static"));
     }
-    MobilityHelper mobClient;
-    mobClient.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    mobClient.SetPositionAllocator(cla);
-    mobClient.Install(m_clientNodes);
 }
 
-void 
-EasyMeshSimulation::CreateWifiChannels()
+void
+EasyMeshSimulation::CreateSpectrumChannels()
 {
-    m_channelHelper = YansWifiChannelHelper::Default();
-    m_sharedWifiChannel = m_channelHelper.Create();
+    // One spectrum channel per band with its own reference path loss, so
+    // 2.4 GHz naturally reaches further than 5 GHz. Within a band the
+    // spectrum PHY only decodes PPDUs overlapping its primary channel, so
+    // the fronthaul channel plan really separates BSSs.
+    auto makeChannel = [](double refLoss) {
+        auto channel = CreateObject<MultiModelSpectrumChannel>();
+        auto loss = CreateObject<LogDistancePropagationLossModel>();
+        loss->SetAttribute("Exponent", DoubleValue(PATHLOSS_EXPONENT));
+        loss->SetAttribute("ReferenceLoss", DoubleValue(refLoss));
+        channel->AddPropagationLossModel(loss);
+        channel->SetPropagationDelayModel(CreateObject<ConstantSpeedPropagationDelayModel>());
+        // Do not deliver PPDUs to receivers whose channel they cannot overlap
+        // (e.g. 5 GHz fronthaul vs. backhaul): big speed-up, no effect on results.
+        channel->AddSpectrumTransmitFilter(CreateObject<WifiBandwidthFilter>());
+        return channel;
+    };
+    m_channel24 = makeChannel(REF_LOSS_2_4GHZ_DB);
+    m_channel5  = makeChannel(REF_LOSS_5GHZ_DB);
 }
 
-void 
-EasyMeshSimulation::CreateBackhaulLinks()
+void
+EasyMeshSimulation::InstallBackhaulDevices()
 {
-    m_wifiHelper.SetStandard(WIFI_STANDARD_80211be);
-    m_wifiHelper.SetRemoteStationManager("ns3::IdealWifiManager");
+    // Every node runs a backhaul BSS (bBSS) on the dedicated backhaul channel;
+    // every Agent also has a backhaul STA (bSTA) pinned to its parent's bBSS.
+    WifiHelper wifi;
+    wifi.SetStandard(WIFI_STANDARD_80211be);
+    wifi.SetRemoteStationManager("ns3::IdealWifiManager");
 
-    m_phyHelper = YansWifiPhyHelper();
-    m_phyHelper.SetChannel(m_sharedWifiChannel);
-    m_phyHelper.Set("ChannelSettings", StringValue(WIFI_CHANNEL_SETTINGS));
-    m_phyHelper.Set("TxPowerStart", DoubleValue(20.0));
-    m_phyHelper.Set("TxPowerEnd",   DoubleValue(20.0));
+    SpectrumWifiPhyHelper phy;
+    phy.AddChannel(m_channel5, WIFI_SPECTRUM_5_GHZ);
+    phy.Set("ChannelSettings", StringValue(kBackhaulChannel.ToSettings()));
+    phy.Set("TxPowerStart", DoubleValue(TX_POWER_DBM));
+    phy.Set("TxPowerEnd",   DoubleValue(TX_POWER_DBM));
+    phy.Set("CcaEdThreshold", DoubleValue(CCA_ED_THRESHOLD_DBM));
 
-    Time beaconInterval = MicroSeconds(WIFI_BEACON_INTERVAL_US);
+    WifiMacHelper mac;
+    const Ssid ssid("EasyMesh-Backhaul");
+    mac.SetType("ns3::ApWifiMac",
+                "Ssid", SsidValue(ssid),
+                "BeaconInterval", TimeValue(MicroSeconds(WIFI_BEACON_INTERVAL_US)));
+
+    m_ctrlBap = DynamicCast<WifiNetDevice>(wifi.Install(phy, mac, m_controllerNode.Get(0)).Get(0));
+    m_bssMap[m_ctrlBap->GetMac()->GetAddress()] = {-1, true, EmBand::BAND_5GHZ};
+    NetDeviceContainer pcapDevices(m_ctrlBap);
 
     for (uint32_t a = 0; a < m_numAgents; ++a)
     {
-        Ptr<Node> parentNode = (m_agentParent[a] < 0) ? m_controllerNode.Get(0)
-                                                      : m_agentNodes.Get(m_agentParent[a]);
-        Vector parentPosition = (m_agentParent[a] < 0) ? CONTROLLER_POS
-                                                       : GetAgentPosition(m_agentParent[a]);
+        m_agentBap[a] = DynamicCast<WifiNetDevice>(wifi.Install(phy, mac, m_agentNodes.Get(a)).Get(0));
+        m_bssMap[m_agentBap[a]->GetMac()->GetAddress()] = {static_cast<int32_t>(a), true, EmBand::BAND_5GHZ};
+        pcapDevices.Add(m_agentBap[a]);
+    }
 
-        std::ostringstream ssidName;
-        ssidName << "EasyMesh-Backhaul-" << a;
-        Ssid ssid = Ssid(ssidName.str());
+    mac.SetType("ns3::StaWifiMac",
+                "Ssid", SsidValue(ssid),
+                "ActiveProbing", BooleanValue(true));
+    for (uint32_t a = 0; a < m_numAgents; ++a)
+    {
+        auto dev = DynamicCast<WifiNetDevice>(wifi.Install(phy, mac, m_agentNodes.Get(a)).Get(0));
+        auto& sta = m_stas[BstaIndex(a)];
+        sta.device     = dev;
+        sta.mac        = DynamicCast<StaWifiMac>(dev->GetMac());
+        sta.assocMgr   = CreateObject<EasyMeshAssocManager>();
+        sta.isBackhaul = true;
+        sta.ownerId    = a;
+        sta.mac->SetAssocManager(sta.assocMgr);
+        sta.assocMgr->SetTargetBssid(BackhaulBssid(m_plannedParent[a]));
+        pcapDevices.Add(dev);
 
-        m_macHelper.SetType("ns3::ApWifiMac",
-                            "Ssid", SsidValue(ssid),
-                            "BeaconInterval", TimeValue(beaconInterval));
-        NetDeviceContainer parentDev = m_wifiHelper.Install(m_phyHelper, m_macHelper, parentNode);
+        auto link = Create<EasyMeshLink>(a, m_controllerNode.Get(0), m_agentNodes.Get(a),
+                                         LinkType::BACKHAUL, 5.0);
+        m_agents[a]->SetBackhaulLink(link);
 
-        m_macHelper.SetType("ns3::StaWifiMac",
-                            "Ssid", SsidValue(ssid),
-                            "ActiveProbing", BooleanValue(false));
-        NetDeviceContainer agentDev = m_wifiHelper.Install(m_phyHelper, m_macHelper, m_agentNodes.Get(a));
+        NS_LOG_INFO("BH: Agent" << a << " bSTA -> "
+                    << (m_plannedParent[a] < 0 ? std::string("Controller")
+                                               : "Agent" + std::to_string(m_plannedParent[a]))
+                    << " bBSS");
+    }
 
-        m_backhaulDevices.Add(parentDev);
-        m_backhaulDevices.Add(agentDev);
+    if (m_pcap) phy.EnablePcap("easymesh-bh", pcapDevices);
+}
 
-        double dist = ComputeDistance(parentPosition, GetAgentPosition(a));
-        double pl   = 40.0 + 30.0 * std::log10(std::max(1.0, dist));
-        double rssi = 20.0 + 6.0 - pl;
-        double snr  = rssi - (-95.0);
-        uint32_t mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
-        double tput  = (mcs + 1) * 5.5;
+void
+EasyMeshSimulation::InstallFronthaulDevices()
+{
+    // Dual-band Agents: one 2.4 GHz and one 5 GHz fronthaul BSS, same SSID.
+    // Radios start on the first channel of their band; the channel planner
+    // (if enabled) retunes them before the simulation starts.
+    WifiHelper wifi;
+    wifi.SetStandard(WIFI_STANDARD_80211ax);
+    wifi.SetRemoteStationManager("ns3::IdealWifiManager");
 
-        Ptr<EasyMeshLink> link = Create<EasyMeshLink>(a,
-                                                      parentNode,
-                                                      m_agentNodes.Get(a),
-                                                      LinkType::BACKHAUL,
-                                                      5.0);
-        link->UpdateMetrics(rssi, snr, mcs, tput, 0.0);
-        m_links.push_back(link);
+    WifiMacHelper mac;
+    mac.SetType("ns3::ApWifiMac",
+                "Ssid", SsidValue(Ssid("EasyMesh-Fronthaul")),
+                "BeaconInterval", TimeValue(MicroSeconds(WIFI_BEACON_INTERVAL_US)));
 
-        std::ostringstream parentName;
-        if (m_agentParent[a] < 0)
+    const std::vector<uint16_t> ch24 FH24_CHANNELS;
+    const std::vector<uint16_t> ch5  FH5_CHANNELS;
+    const std::pair<EmBand, EmChannel> bands[] = {
+        {EmBand::BAND_2_4GHZ, EmChannel{ch24.front(), FH24_WIDTH_MHZ, EmBand::BAND_2_4GHZ}},
+        {EmBand::BAND_5GHZ,   EmChannel{ch5.front(),  FH5_WIDTH_MHZ,  EmBand::BAND_5GHZ}},
+    };
+
+    for (const auto& [band, channel] : bands)
+    {
+        SpectrumWifiPhyHelper phy;
+        if (band == EmBand::BAND_2_4GHZ)
+            phy.AddChannel(m_channel24, WIFI_SPECTRUM_2_4_GHZ);
+        else
+            phy.AddChannel(m_channel5, WIFI_SPECTRUM_5_GHZ);
+        phy.Set("ChannelSettings", StringValue(channel.ToSettings()));
+        phy.Set("TxPowerStart", DoubleValue(TX_POWER_DBM));
+        phy.Set("TxPowerEnd",   DoubleValue(TX_POWER_DBM));
+        phy.Set("CcaEdThreshold", DoubleValue(CCA_ED_THRESHOLD_DBM));
+
+        NetDeviceContainer pcapDevices;
+        for (uint32_t a = 0; a < m_numAgents; ++a)
         {
-            parentName << "Controller(AP)";
+            auto dev = DynamicCast<WifiNetDevice>(wifi.Install(phy, mac, m_agentNodes.Get(a)).Get(0));
+            auto radio = Create<EasyMeshRadio>(a, band, dev, channel);
+            radio->StartMonitoring();
+            m_agents[a]->AddRadio(radio);
+            m_bssMap[radio->GetBssid()] = {static_cast<int32_t>(a), false, band};
+            pcapDevices.Add(dev);
+        }
+        if (m_pcap) phy.EnablePcap(band == EmBand::BAND_2_4GHZ ? "easymesh-fh24" : "easymesh-fh5",
+                                   pcapDevices);
+    }
+}
+
+Ptr<EasyMeshRadio>
+EasyMeshSimulation::SelectInitialRadio(uint32_t clientId) const
+{
+    auto radio = m_controller->SelectBestRadio(clientId, nullptr, std::nullopt, MIN_ASSOC_RSSI_DBM);
+    if (!radio)
+    {
+        radio = m_controller->SelectBestRadio(clientId, nullptr, std::nullopt,
+                                              -std::numeric_limits<double>::infinity());
+    }
+    return radio;
+}
+
+void
+EasyMeshSimulation::InstallClientDevices()
+{
+    // Single-radio, dual-band clients: the PHY is attached to both band
+    // channels and retunes when it moves between 2.4 GHz and 5 GHz BSSs.
+    WifiHelper wifi;
+    wifi.SetStandard(WIFI_STANDARD_80211ax);
+    wifi.SetRemoteStationManager("ns3::IdealWifiManager");
+
+    SpectrumWifiPhyHelper phy;
+    phy.AddChannel(m_channel24, WIFI_SPECTRUM_2_4_GHZ);
+    phy.AddChannel(m_channel5, WIFI_SPECTRUM_5_GHZ);
+    phy.Set("TxPowerStart", DoubleValue(TX_POWER_DBM));
+    phy.Set("TxPowerEnd",   DoubleValue(TX_POWER_DBM));
+    phy.Set("CcaEdThreshold", DoubleValue(CCA_ED_THRESHOLD_DBM));
+    // a single-radio client only listens on the band it is tuned to
+    phy.Set("TrackSignalsFromInactiveInterfaces", BooleanValue(false));
+
+    WifiMacHelper mac;
+    mac.SetType("ns3::StaWifiMac",
+                "Ssid", SsidValue(Ssid("EasyMesh-Fronthaul")),
+                "ActiveProbing", BooleanValue(true));
+
+    NetDeviceContainer pcapDevices;
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        // Initial association: Controller-guided choice of BSS. The PHY is
+        // created directly on that channel (no band change before start).
+        auto radio = SelectInitialRadio(c);
+        phy.Set("ChannelSettings", StringValue(radio->GetChannel().ToSettings()));
+        auto dev = DynamicCast<WifiNetDevice>(wifi.Install(phy, mac, m_clientNodes.Get(c)).Get(0));
+        auto& sta = m_stas[c];
+        sta.device   = dev;
+        sta.mac      = DynamicCast<StaWifiMac>(dev->GetMac());
+        sta.assocMgr = CreateObject<EasyMeshAssocManager>();
+        sta.ownerId  = c;
+        sta.mac->SetAssocManager(sta.assocMgr);
+        pcapDevices.Add(dev);
+
+        sta.assocMgr->SetTargetBssid(radio->GetBssid());
+        NS_LOG_INFO("STA" << c << " initial BSS A" << radio->GetAgentId() << "/"
+                    << BandStr(radio->GetBand()) << " ch" << radio->GetChannel().number
+                    << "  RSSI=" << ClientRssi(c, radio) << "dBm");
+    }
+    if (m_pcap) phy.EnablePcap("easymesh-sta", pcapDevices);
+}
+
+void
+EasyMeshSimulation::BuildTopology()
+{
+    NS_LOG_INFO("=== BuildTopology ===");
+    CreateNodes();
+    InstallMobility();
+    CreateSpectrumChannels();
+
+    m_plannedParent = ComputeBackhaulTree();
+    m_agentParent   = m_plannedParent;
+
+    // Logical EasyMesh objects
+    m_controller = Create<EasyMeshController>(0, m_controllerNode.Get(0));
+    m_controller->SetNumClients(m_numClients);
+    m_controller->EnableSteering(m_steering);
+    m_controller->EnableLoadBalancing(m_loadBalancing);
+    for (uint32_t a = 0; a < m_numAgents; ++a)
+    {
+        auto agent = Create<EasyMeshAgent>(a,
+                                           m_agentNodes.Get(a),
+                                           AgentRole::HYBRID,
+                                           GetAgentPosition(a));
+        m_agents.push_back(agent);
+        m_controller->RegisterAgent(agent);
+    }
+
+    ControllerOps ops;
+    ops.clientRssi    = [this](uint32_t c, Ptr<EasyMeshRadio> r) { return ClientRssi(c, r); };
+    ops.radioRssi     = [this](Ptr<EasyMeshRadio> a, Ptr<EasyMeshRadio> b) { return RadioRssi(a, b); };
+    ops.phyRate       = [](double rssi, uint16_t width) { return PhyRateMbps(rssi, width); };
+    ops.steerClient   = [this](uint32_t c, Ptr<EasyMeshRadio> r, SteeringReason reason) {
+        return SteerClient(c, r, reason);
+    };
+    ops.switchChannel = [this](Ptr<EasyMeshRadio> r, const EmChannel& ch) { SwitchRadioChannel(r, ch); };
+    m_controller->SetOps(ops);
+
+    m_stas.resize(m_numClients + m_numAgents);
+    InstallBackhaulDevices();
+    InstallFronthaulDevices();
+    UpdateBackhaulMetrics();
+
+    if (m_channelPlanMode == ChannelPlanMode::NONE)
+        m_controller->RecordInitialChannels();
+    else
+        m_controller->PlanChannels(true);
+
+    InstallClientDevices();
+
+    for (uint32_t i = 0; i < m_stas.size(); ++i)
+    {
+        m_stas[i].mac->TraceConnectWithoutContext(
+            "Assoc", MakeCallback(&EasyMeshSimulation::OnStaAssoc, this).Bind(i));
+        m_stas[i].mac->TraceConnectWithoutContext(
+            "DeAssoc", MakeCallback(&EasyMeshSimulation::OnStaDeAssoc, this).Bind(i));
+    }
+    NS_LOG_INFO("=== Topology ready ===");
+}
+
+// ════════════════════════════════════════════════════════════════
+//  IP layer
+// ════════════════════════════════════════════════════════════════
+
+uint32_t
+EasyMeshSimulation::AssignIpv4(Ptr<Node> node, Ptr<NetDevice> dev, Ipv4Address addr)
+{
+    auto ipv4 = node->GetObject<Ipv4>();
+    int32_t ifIndex = ipv4->GetInterfaceForDevice(dev);
+    if (ifIndex < 0)
+    {
+        ifIndex = ipv4->AddInterface(dev);
+    }
+    ipv4->AddAddress(ifIndex, Ipv4InterfaceAddress(addr, Ipv4Mask("255.255.0.0")));
+    ipv4->SetMetric(ifIndex, 1);
+    ipv4->SetForwarding(ifIndex, true);
+    ipv4->SetUp(ifIndex);
+    return static_cast<uint32_t>(ifIndex);
+}
+
+void
+EasyMeshSimulation::InstallProtocolStack()
+{
+    NS_LOG_INFO("=== Install Protocol Stack ===");
+
+    InternetStackHelper inet;
+    inet.Install(m_controllerNode);
+    inet.Install(m_agentNodes);
+    inet.Install(m_clientNodes);
+
+    // Backhaul 10.1.0.0/16: Controller 10.1.0.1, Agent a bBSS 10.1.(a+1).1, bSTA 10.1.(a+1).2
+    // Fronthaul 10.2.0.0/16: Agent a 2.4G 10.2.1.(a+1), 5G 10.2.2.(a+1), clients 10.2.10+.x
+    // All forwarding uses explicit host/default routes (RebuildRoutes), so the
+    // shared /16 on several interfaces of one node is never ambiguous.
+    auto addr = [](uint32_t b2, uint32_t b3, uint32_t b4) {
+        return Ipv4Address((10u << 24) | (b2 << 16) | (b3 << 8) | b4);
+    };
+
+    m_controllerIp = addr(1, 0, 1);
+    m_ctrlBapIf = AssignIpv4(m_controllerNode.Get(0), m_ctrlBap, m_controllerIp);
+
+    for (uint32_t a = 0; a < m_numAgents; ++a)
+    {
+        m_agentBapIp[a]  = addr(1, a + 1, 1);
+        m_agentBstaIp[a] = addr(1, a + 1, 2);
+        m_agentBapIf[a]  = AssignIpv4(m_agentNodes.Get(a), m_agentBap[a], m_agentBapIp[a]);
+        m_agentBstaIf[a] = AssignIpv4(m_agentNodes.Get(a), m_stas[BstaIndex(a)].device, m_agentBstaIp[a]);
+
+        for (auto& radio : m_agents[a]->GetRadios())
+        {
+            const auto ip = addr(2, radio->GetBand() == EmBand::BAND_2_4GHZ ? 1 : 2, a + 1);
+            radio->SetIpv4(ip, AssignIpv4(m_agentNodes.Get(a), radio->GetDevice(), ip));
+        }
+    }
+
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        m_clientIp[c] = addr(2, 10 + c / 250, c % 250 + 1);
+        m_clientIf[c] = AssignIpv4(m_clientNodes.Get(c), m_stas[c].device, m_clientIp[c]);
+    }
+
+    RebuildRoutes();
+    NS_LOG_INFO("=== END Protocol Stack ===");
+}
+
+void
+EasyMeshSimulation::RebuildRoutes()
+{
+    Ipv4StaticRoutingHelper helper;
+    auto routingOf = [&](Ptr<Node> node) { return helper.GetStaticRouting(node->GetObject<Ipv4>()); };
+
+    // Drop every host/default route we installed; keep connected networks
+    auto clear = [&](Ptr<Node> node) {
+        auto routing = routingOf(node);
+        for (int32_t i = static_cast<int32_t>(routing->GetNRoutes()) - 1; i >= 0; --i)
+        {
+            const auto route = routing->GetRoute(static_cast<uint32_t>(i));
+            if (route.IsHost() || route.IsDefault())
+            {
+                routing->RemoveRoute(static_cast<uint32_t>(i));
+            }
+        }
+    };
+    clear(m_controllerNode.Get(0));
+    for (uint32_t a = 0; a < m_numAgents; ++a) clear(m_agentNodes.Get(a));
+    for (uint32_t c = 0; c < m_numClients; ++c) clear(m_clientNodes.Get(c));
+
+    // Uplink: every online Agent points at its (associated) parent bBSS
+    for (uint32_t a = 0; a < m_numAgents; ++a)
+    {
+        const int32_t p = m_agentParent[a];
+        if (!IsAgentOnline(a) || (p >= 0 && !IsAgentOnline(p))) continue;
+        const Ipv4Address gw = (p < 0) ? m_controllerIp : m_agentBapIp[p];
+        auto routing = routingOf(m_agentNodes.Get(a));
+        routing->SetDefaultRoute(gw, m_agentBstaIf[a]);
+        routing->AddHostRouteTo(m_controllerIp, gw, m_agentBstaIf[a]);
+    }
+
+    // Downlink: host route to each client along its serving Agent's path
+    auto ctrlRouting = routingOf(m_controllerNode.Get(0));
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        auto radio = m_controller->GetServingRadio(c);
+        if (!radio || !IsAgentOnline(radio->GetAgentId())) continue;
+        const uint32_t serving = radio->GetAgentId();
+
+        routingOf(m_clientNodes.Get(c))->SetDefaultRoute(radio->GetIp(), m_clientIf[c]);
+        routingOf(m_agentNodes.Get(serving))->AddHostRouteTo(m_clientIp[c], radio->GetIfIndex());
+
+        uint32_t current = serving;
+        for (uint32_t hops = 0; hops <= m_numAgents; ++hops)   // bounded: transient cycles
+        {
+            const int32_t p = m_agentParent[current];
+            if (p < 0)
+            {
+                ctrlRouting->AddHostRouteTo(m_clientIp[c], m_agentBstaIp[current], m_ctrlBapIf);
+                break;
+            }
+            if (!IsAgentOnline(p)) break;
+            routingOf(m_agentNodes.Get(p))->AddHostRouteTo(m_clientIp[c], m_agentBstaIp[current],
+                                                           m_agentBapIf[p]);
+            current = p;
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  BSS transitions
+// ════════════════════════════════════════════════════════════════
+
+void
+EasyMeshSimulation::StartTransition(uint32_t staIdx, Mac48Address bssid, const EmChannel& channel,
+                                    const SteeringEvent& ev)
+{
+    auto& s = m_stas[staIdx];
+    if (s.pending)
+    {
+        FinishTransition(staIdx, false);    // superseded by a newer decision
+    }
+
+    s.pending       = true;
+    s.target        = bssid;
+    s.targetChannel = channel;
+    s.start         = Simulator::Now();
+    s.hopTries      = 0;
+    s.ev            = ev;
+    s.assocMgr->SetTargetBssid(bssid);
+    if (!s.isBackhaul)
+    {
+        m_controller->NotifyTransitionStarted(s.ownerId);
+    }
+
+    // BTM-like transition: leave the current BSS by retuning to an idle
+    // parking channel (forces disassociation + re-scan), then tune to the
+    // target channel where only the target BSSID is accepted.
+    s.device->GetPhy()->SetAttribute("ChannelSettings", StringValue(kParkingChannel.ToSettings()));
+    s.hopEvent = Simulator::Schedule(MilliSeconds(1), &EasyMeshSimulation::HopToTarget, this, staIdx);
+    s.timeoutEvent = Simulator::Schedule(Seconds(STEER_TIMEOUT),
+                                         &EasyMeshSimulation::OnTransitionTimeout, this, staIdx);
+}
+
+void
+EasyMeshSimulation::HopToTarget(uint32_t staIdx)
+{
+    auto& s = m_stas[staIdx];
+    auto phy = s.device->GetPhy();
+    // A channel switch can be postponed while the PHY is busy: wait until
+    // the parking switch has happened before moving on to the target.
+    if (phy->GetChannelNumber() == PARKING_CHANNEL_NUMBER || s.hopTries >= 50)
+    {
+        phy->SetAttribute("ChannelSettings", StringValue(s.targetChannel.ToSettings()));
+        return;
+    }
+    s.hopTries++;
+    phy->SetAttribute("ChannelSettings", StringValue(kParkingChannel.ToSettings()));
+    s.hopEvent = Simulator::Schedule(MilliSeconds(1), &EasyMeshSimulation::HopToTarget, this, staIdx);
+}
+
+void
+EasyMeshSimulation::FinishTransition(uint32_t staIdx, bool success)
+{
+    auto& s = m_stas[staIdx];
+    s.pending = false;
+    s.hopEvent.Cancel();
+    s.timeoutEvent.Cancel();
+
+    s.ev.success   = success;
+    s.ev.latencyMs = success ? (Simulator::Now() - s.start).GetSeconds() * 1000.0 : 0.0;
+    if (success)
+    {
+        if (s.isBackhaul)
+        {
+            const int32_t p = s.ev.toAgent;
+            s.ev.rssiAfterDbm = EstimateRssi(p < 0 ? CONTROLLER_POS : GetAgentPosition(p),
+                                             GetAgentPosition(s.ownerId), EmBand::BAND_5GHZ);
         }
         else
         {
-            parentName << "Agent" << m_agentParent[a] << "(AP)";
+            s.ev.rssiAfterDbm = ClientRssi(s.ownerId, m_agents[s.ev.toAgent]->GetRadio(s.ev.toBand));
         }
+    }
+    m_controller->RecordTransition(s.ev);
+}
 
-        NS_LOG_INFO("BH Wi-Fi: " << parentName.str() << " <-> Agent" << a << "(STA)"
-                    << "  dist=" << dist << "m  RSSI=" << rssi
-                    << "dBm  MCS=" << mcs << "  Tput=" << tput << "Mbps");
+void
+EasyMeshSimulation::OnTransitionTimeout(uint32_t staIdx)
+{
+    auto& s = m_stas[staIdx];
+    if (!s.pending) return;
+
+    NS_LOG_INFO("[t=" << Simulator::Now().GetSeconds() << "] "
+                << (s.isBackhaul ? "bSTA" : "STA") << s.ownerId
+                << " transition to " << s.target << " timed out");
+    FinishTransition(staIdx, false);
+    if (!s.isBackhaul)
+    {
+        // Client falls back to its own choice among BSSs on this channel.
+        // A bSTA stays pinned: it must never pick a descendant's bBSS.
+        s.assocMgr->ClearTargetBssid();
+    }
+}
+
+void
+EasyMeshSimulation::OnStaAssoc(uint32_t staIdx, Mac48Address bssid)
+{
+    auto it = m_bssMap.find(bssid);
+    if (it == m_bssMap.end())
+    {
+        NS_LOG_WARN("STA index " << staIdx << " associated to unknown BSSID " << bssid);
+        return;
+    }
+    auto& s = m_stas[staIdx];
+    const BssInfo& bss = it->second;
+
+    if (s.isBackhaul)
+    {
+        m_agentParent[s.ownerId] = bss.agentId;
+        UpdateBackhaulMetrics();
+        NS_LOG_INFO("[t=" << Simulator::Now().GetSeconds() << "] bSTA" << s.ownerId
+                    << " associated to " << (bss.agentId < 0 ? std::string("Controller")
+                                                             : "Agent" + std::to_string(bss.agentId)));
+    }
+    else
+    {
+        auto radio = m_agents[bss.agentId]->GetRadio(bss.band);
+        m_controller->NotifyClientAssociated(s.ownerId, radio);
+        NS_LOG_INFO("[t=" << Simulator::Now().GetSeconds() << "] STA" << s.ownerId
+                    << " associated to A" << bss.agentId << "/" << BandStr(bss.band)
+                    << " ch" << radio->GetChannel().number
+                    << "  RSSI=" << ClientRssi(s.ownerId, radio) << "dBm");
+    }
+
+    if (s.pending && bssid == s.target)
+    {
+        FinishTransition(staIdx, true);
+    }
+    RebuildRoutes();
+    UpdateAnimationNodes();
+}
+
+void
+EasyMeshSimulation::OnStaDeAssoc(uint32_t staIdx, Mac48Address bssid)
+{
+    const auto& s = m_stas[staIdx];
+    NS_LOG_DEBUG("[t=" << Simulator::Now().GetSeconds() << "] "
+                 << (s.isBackhaul ? "bSTA" : "STA") << s.ownerId << " left " << bssid);
+    if (!s.isBackhaul)
+    {
+        m_controller->NotifyClientDisassociated(s.ownerId);
+    }
+}
+
+bool
+EasyMeshSimulation::SteerClient(uint32_t clientId, Ptr<EasyMeshRadio> target, SteeringReason reason)
+{
+    if (!target || !IsAgentOnline(target->GetAgentId()))
+    {
+        return false;
+    }
+    auto serving = m_controller->GetServingRadio(clientId);
+
+    SteeringEvent ev{};
+    ev.timeS         = Simulator::Now().GetSeconds();
+    ev.isBackhaul    = false;
+    ev.staId         = clientId;
+    ev.fromAgent     = serving ? static_cast<int32_t>(serving->GetAgentId()) : -1;
+    ev.fromBand      = serving ? serving->GetBand() : EmBand::BAND_5GHZ;
+    ev.toAgent       = static_cast<int32_t>(target->GetAgentId());
+    ev.toBand        = target->GetBand();
+    ev.reason        = reason;
+    ev.rssiBeforeDbm = serving ? ClientRssi(clientId, serving) : -100.0;
+    ev.rssiAfterDbm  = ClientRssi(clientId, target);
+
+    NS_LOG_INFO("[t=" << ev.timeS << "] " << ReasonStr(reason) << " STA" << clientId << " "
+                << (serving ? "A" + std::to_string(ev.fromAgent) + "/" + BandStr(ev.fromBand)
+                            : std::string("-"))
+                << " -> A" << ev.toAgent << "/" << BandStr(ev.toBand)
+                << " ch" << target->GetChannel().number
+                << "  RSSI " << ev.rssiBeforeDbm << " -> " << ev.rssiAfterDbm << "dBm");
+
+    StartTransition(clientId, target->GetBssid(), target->GetChannel(), ev);
+    return true;
+}
+
+void
+EasyMeshSimulation::SwitchRadioChannel(Ptr<EasyMeshRadio> radio, const EmChannel& channel)
+{
+    radio->SetChannel(channel);
+
+    // No CSA in ns-3: the Controller moves the radio's clients along with it
+    const auto clients = radio->GetClients();
+    for (uint32_t c : clients)
+    {
+        if (m_controller->GetServingRadio(c) != radio) continue;
+        SteeringEvent ev{};
+        ev.timeS         = Simulator::Now().GetSeconds();
+        ev.staId         = c;
+        ev.fromAgent     = ev.toAgent = static_cast<int32_t>(radio->GetAgentId());
+        ev.fromBand      = ev.toBand  = radio->GetBand();
+        ev.reason        = SteeringReason::CHANNEL_SWITCH;
+        ev.rssiBeforeDbm = ev.rssiAfterDbm = ClientRssi(c, radio);
+        StartTransition(c, radio->GetBssid(), channel, ev);
+    }
+}
+
+void
+EasyMeshSimulation::ReparentAgent(uint32_t agentId, int32_t newParent, SteeringReason reason)
+{
+    const int32_t oldParent = m_agentParent[agentId];
+    const Vector here = GetAgentPosition(agentId);
+
+    SteeringEvent ev{};
+    ev.timeS         = Simulator::Now().GetSeconds();
+    ev.isBackhaul    = true;
+    ev.staId         = agentId;
+    ev.fromAgent     = oldParent;
+    ev.toAgent       = newParent;
+    ev.fromBand      = ev.toBand = EmBand::BAND_5GHZ;
+    ev.reason        = reason;
+    ev.rssiBeforeDbm = EstimateRssi(oldParent < 0 ? CONTROLLER_POS : GetAgentPosition(oldParent),
+                                    here, EmBand::BAND_5GHZ);
+    ev.rssiAfterDbm  = EstimateRssi(newParent < 0 ? CONTROLLER_POS : GetAgentPosition(newParent),
+                                    here, EmBand::BAND_5GHZ);
+
+    NS_LOG_INFO("  Agent" << agentId << " backhaul "
+                << (oldParent < 0 ? std::string("C") : "A" + std::to_string(oldParent)) << " -> "
+                << (newParent < 0 ? std::string("C") : "A" + std::to_string(newParent)));
+    StartTransition(BstaIndex(agentId), BackhaulBssid(newParent), kBackhaulChannel, ev);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Periodic tasks and failure events
+// ════════════════════════════════════════════════════════════════
+
+void
+EasyMeshSimulation::CheckRoaming()
+{
+    // STA-initiated roaming (e.g. from background scans / 802.11k reports):
+    // the client only looks at signal strength, not at load or backhaul.
+    for (uint32_t c = 0; c < m_numClients; ++c)
+    {
+        if (!m_controller->IsTransitionAllowed(c)) continue;
+        auto serving = m_controller->GetServingRadio(c);
+        if (!serving) continue;
+
+        const double rssi = ClientRssi(c, serving);
+        if (rssi >= ROAM_RSSI_THRESHOLD) continue;
+
+        Ptr<EasyMeshRadio> best;
+        double bestRssi = -std::numeric_limits<double>::infinity();
+        for (const auto& agent : m_agents)
+        {
+            if (!agent->IsOnline()) continue;
+            for (const auto& radio : agent->GetRadios())
+            {
+                const double r = ClientRssi(c, radio);
+                if (radio != serving && r > bestRssi)
+                {
+                    bestRssi = r;
+                    best = radio;
+                }
+            }
+        }
+        if (best && bestRssi >= rssi + ROAM_HYSTERESIS_DB)
+        {
+            SteerClient(c, best, SteeringReason::ROAMING);
+        }
+    }
+}
+
+void
+EasyMeshSimulation::SetAgentRadiosPower(uint32_t agentId, bool on)
+{
+    std::vector<Ptr<WifiPhy>> phys = {m_agentBap[agentId]->GetPhy(),
+                                      m_stas[BstaIndex(agentId)].device->GetPhy()};
+    for (const auto& radio : m_agents[agentId]->GetRadios())
+    {
+        phys.push_back(radio->GetPhy());
+    }
+    for (const auto& phy : phys)
+    {
+        if (on && phy->IsStateOff())
+            phy->ResumeFromOff();
+        else if (!on && !phy->IsStateOff())
+            phy->SetOffMode();
     }
 }
 
@@ -701,10 +1178,9 @@ void
 EasyMeshSimulation::HandleAgentOffline()
 {
     // Take every requested agent offline first (validating + deduping),
-    // then rebuild the backhaul MST and client associations exactly
-    // once for the whole set — rebuilding per-agent would waste cycles
-    // and, worse, let an already-degraded topology bias which parent
-    // gets picked for the next offline agent in the batch.
+    // then rebuild the backhaul MST and steer clients exactly once for the
+    // whole set — rebuilding per-agent would let an already-degraded
+    // topology bias which parent gets picked for the next offline agent.
     std::vector<uint32_t> newlyOffline;
     for (uint32_t agentId : m_offlineAgentIds)
     {
@@ -733,308 +1209,55 @@ EasyMeshSimulation::HandleAgentOffline()
     NS_LOG_INFO("[Controller t=" << Simulator::Now().GetSeconds() << "] AGENT_OFFLINE "
                 << offlineList.str() << "  (" << newlyOffline.size() << " agent(s))");
 
-    std::vector<int32_t> previousParents = m_agentParent;
-
     for (uint32_t agentId : newlyOffline)
     {
         m_agentOnline[agentId] = false;
-
-        auto offlineBackhaulLink = FindBackhaulLinkForAgent(agentId);
-        if (offlineBackhaulLink)
-        {
-            offlineBackhaulLink->SetActive(false);
-        }
+        m_agents[agentId]->SetOnline(false);
+        auto& bsta = m_stas[BstaIndex(agentId)];
+        bsta.pending = false;
+        bsta.hopEvent.Cancel();
+        bsta.timeoutEvent.Cancel();
+        SetAgentRadiosPower(agentId, false);   // all four radios go dark
     }
 
-    BuildBackhaulTree();
-    RefreshBackhaulLinks();
-
-    for (uint32_t agentId = 0; agentId < m_numAgents; ++agentId)
+    OptimizeBackhaul(true, SteeringReason::AGENT_OFFLINE);
+    for (uint32_t agentId : newlyOffline)
     {
-        if (!IsAgentOnline(agentId) || previousParents[agentId] == m_agentParent[agentId])
-        {
-            continue;
-        }
-
-        std::ostringstream oldParent;
-        std::ostringstream newParent;
-        if (previousParents[agentId] < 0)
-        {
-            oldParent << "C";
-        }
-        else
-        {
-            oldParent << "A" << previousParents[agentId];
-        }
-        if (m_agentParent[agentId] < 0)
-        {
-            newParent << "C";
-        }
-        else
-        {
-            newParent << "A" << m_agentParent[agentId];
-        }
-
-        NS_LOG_INFO("Agent" << agentId << " reselected uplink "
-                    << oldParent.str() << " -> " << newParent.str());
+        m_controller->HandleAgentOffline(agentId);
     }
-
-    bool updatedClients = false;
-    for (uint32_t clientId = 0; clientId < m_numClients; ++clientId)
-    {
-        const auto currentAgent = m_clientToAgent[clientId];
-        const auto newAgent = SelectBestUplinkAgent(clientId);
-        if (newAgent >= m_numAgents || newAgent == currentAgent)
-        {
-            continue;
-        }
-
-        NS_LOG_INFO("STA" << clientId << " uplink reselected A" << currentAgent
-                    << " -> A" << newAgent << " after " << offlineList.str() << " offline");
-        UpdateClientAssociation(clientId, newAgent);
-        updatedClients = true;
-    }
-
-    (void) updatedClients;
-    RebuildClientRoutes();
-
-    if (m_animation)
-    {
-        UpdateAnimationNodes(m_animation);
-        UpdateAnimationLinks(m_animation);
-    }
+    RebuildRoutes();
+    UpdateAnimationNodes();
 }
 
-void 
-EasyMeshSimulation::CreateFronthaulLinks()
+void
+EasyMeshSimulation::HandleAgentRecover()
 {
-    WifiHelper fh;
-    fh.SetStandard(WIFI_STANDARD_80211ax);
-    fh.SetRemoteStationManager("ns3::IdealWifiManager");
-    NS_LOG_INFO("=== CreateFronthaulLinks ===");
-
-    YansWifiPhyHelper fhPhy;
-    fhPhy.SetChannel(m_sharedWifiChannel);
-    fhPhy.Set("ChannelSettings", StringValue(WIFI_CHANNEL_SETTINGS));
-    fhPhy.Set("TxPowerStart", DoubleValue(20.0));
-    fhPhy.Set("TxPowerEnd",   DoubleValue(20.0));
-
-    WifiMacHelper fhMac;
-    Time beaconInterval = MicroSeconds(WIFI_BEACON_INTERVAL_US);
-    uint32_t linkId = m_numAgents;
-    const Ssid fronthaulSsid("EasyMesh-Fronthaul");
-
-    for (uint32_t a = 0; a < m_numAgents; ++a)
+    std::vector<uint32_t> recovered;
+    for (uint32_t agentId : m_offlineAgentIds)
     {
-        fhMac.SetType("ns3::ApWifiMac",
-                      "Ssid", SsidValue(fronthaulSsid),
-                      "BeaconInterval", TimeValue(beaconInterval));
-        NetDeviceContainer apDev = fh.Install(fhPhy, fhMac, m_agentNodes.Get(a));
-        m_fronthaulDevices.Add(apDev);
-        m_agentFronthaulDevices[a] = apDev.Get(0);
-    }
-
-    if (m_numClients > 0)
-    {
-        fhMac.SetType("ns3::StaWifiMac",
-                      "Ssid", SsidValue(fronthaulSsid),
-                      "ActiveProbing", BooleanValue(true));
-        NetDeviceContainer staDevices = fh.Install(fhPhy, fhMac, m_clientNodes);
-        m_fronthaulDevices.Add(staDevices);
-
-        for (uint32_t c = 0; c < m_numClients; ++c)
+        if (agentId < m_numAgents && !IsAgentOnline(agentId))
         {
-            m_clientFronthaulDevices[c] = staDevices.Get(c);
-            const uint32_t provisionalAgent = m_clientToAgent[c];
-            const auto rssi = EstimateLinkRssi(
-                GetAgentPosition(provisionalAgent),
-                m_clientNodes.Get(c)->GetObject<MobilityModel>()->GetPosition());
-            const auto snr = rssi - (-95.0);
-            const auto mcs = rssi >= -65 ? 9 : rssi >= -70 ? 7 : rssi >= -76 ? 5 : 3;
-            const auto throughput = EstimateLinkThroughput(rssi);
-
-            Ptr<EasyMeshLink> link = Create<EasyMeshLink>(linkId++,
-                                                          m_agentNodes.Get(provisionalAgent),
-                                                          m_clientNodes.Get(c),
-                                                          LinkType::FRONTHAUL,
-                                                          5.0);
-            link->UpdateMetrics(rssi, snr, mcs, throughput, 0.0);
-            m_links.push_back(link);
+            m_agentOnline[agentId] = true;
+            m_agents[agentId]->SetOnline(true);
+            SetAgentRadiosPower(agentId, true);
+            recovered.push_back(agentId);
         }
     }
+    if (recovered.empty()) return;
+
+    NS_LOG_INFO("[Controller t=" << Simulator::Now().GetSeconds() << "] AGENT_ONLINE "
+                << recovered.size() << " agent(s) back");
+    // The recovered Agents rejoin the backhaul; steering / load balancing
+    // pulls clients onto them over the next ticks.
+    OptimizeBackhaul(true, SteeringReason::BACKHAUL_OPT);
+    UpdateAnimationNodes();
 }
 
-void 
-EasyMeshSimulation::BuildTopology()
-{
-    NS_LOG_INFO("=== BuildTopology ===");
-    CreateNodes();
-    InstallMobility();
-    CreateWifiChannels();
-    BuildBackhaulTree();
-    // Không dùng Ethernet backhaul nữa
-    CreateBackhaulLinks();      // Controller ↔ Agent qua Wi-Fi
+// ════════════════════════════════════════════════════════════════
+//  Traffic
+// ════════════════════════════════════════════════════════════════
 
-    // Logical EasyMesh objects
-    m_controller = Create<EasyMeshController>(0, m_controllerNode.Get(0));
-
-    for (uint32_t a = 0; a < m_numAgents; ++a)
-    {
-        auto agent = Create<EasyMeshAgent>(a,
-                                           m_agentNodes.Get(a),
-                                           AgentRole::HYBRID,
-                                           GetAgentPosition(a));
-        m_agents.push_back(agent);
-        m_controller->RegisterAgent(agent);
-    }
-
-    AssignClientsToAgents();
-    CreateFronthaulLinks();
-
-    for (auto& l : m_links)
-    {
-        m_controller->RegisterLink(l);
-        if (l->GetType() == LinkType::BACKHAUL)
-        {
-            for (auto& agent : m_agents)
-            {
-                if (l->GetDst() == agent->GetNode())
-                {
-                    agent->AddBackhaulLink(l);
-                    break;
-                }
-            }
-        }
-        else if (l->GetType() == LinkType::FRONTHAUL)
-        {
-            for (auto& agent : m_agents)
-            {
-                if (l->GetSrc() == agent->GetNode())
-                {
-                    agent->AddFronthaulLink(l);
-                    break;
-                }
-            }
-        }
-    }
-    NS_LOG_INFO("=== Topology ready ===");
-}
-
-void 
-EasyMeshSimulation::AssignClientsToAgents()
-{
-    for (uint32_t c = 0; c < m_numClients; c++)
-    {
-        const auto clientPosition = m_clientNodes.Get(c)->GetObject<MobilityModel>()->GetPosition();
-        const uint32_t bestAgent = SelectBestUplinkAgent(c);
-        m_clientToAgent[c] = bestAgent;
-        const auto agentPosition = GetAgentPosition(bestAgent);
-
-        NS_LOG_INFO("Best uplink for STA" << c
-                    << " at (" << clientPosition.x << "," << clientPosition.y << ")"
-                    << " is Agent" << bestAgent
-                    << " at (" << agentPosition.x << "," << agentPosition.y << ")");
-    }
-}
-
-void 
-EasyMeshSimulation::InstallProtocolStack()
-{
-    NS_LOG_INFO("=== Install Protocol Stack (shared-channel EasyMesh) ===");
-
-    InternetStackHelper inet;
-    inet.Install(m_controllerNode);
-    inet.Install(m_agentNodes);
-    inet.Install(m_clientNodes);
-
-    Ipv4AddressHelper addr;
-    Ipv4StaticRoutingHelper staticRoutingHelper;
-
-    std::vector<Ipv4Address> parentBhIp(m_numAgents, Ipv4Address::GetAny());
-    std::vector<std::vector<uint32_t>> children(m_numAgents);
-
-    for (uint32_t a = 0; a < m_numAgents; ++a)
-    {
-        if (m_agentParent[a] >= 0)
-        {
-            children[m_agentParent[a]].push_back(a);
-        }
-    }
-
-    for (uint32_t a = 0; a < m_numAgents; ++a)
-    {
-        NetDeviceContainer backhaulPair;
-        backhaulPair.Add(m_backhaulDevices.Get(2 * a));
-        backhaulPair.Add(m_backhaulDevices.Get(2 * a + 1));
-
-        std::ostringstream subnet;
-        subnet << "10.1." << (a + 1) << ".0";
-        addr.SetBase(subnet.str().c_str(), "255.255.255.0");
-        Ipv4InterfaceContainer ifBh = addr.Assign(backhaulPair);
-
-        parentBhIp[a] = ifBh.GetAddress(0);
-        m_agentIp[a] = ifBh.GetAddress(1);
-        m_parentIfIndex[a] = ifBh.Get(0).second;
-        m_agentBackhaulIfIndex[a] = ifBh.Get(1).second;
-
-        if (m_agentParent[a] < 0 && m_controllerIp == Ipv4Address::GetAny())
-        {
-            m_controllerIp = ifBh.GetAddress(0);
-        }
-    }
-
-    if (m_controllerIp == Ipv4Address::GetAny())
-    {
-        m_controllerIp = parentBhIp[0];
-    }
-
-    for (uint32_t a = 0; a < m_numAgents; ++a)
-    {
-        m_controllerBackhaulIp[a] = m_controllerIp;
-    }
-
-    NetDeviceContainer fronthaulGroup;
-    for (uint32_t a = 0; a < m_numAgents; ++a)
-    {
-        fronthaulGroup.Add(m_agentFronthaulDevices[a]);
-    }
-    for (uint32_t c = 0; c < m_numClients; ++c)
-    {
-        fronthaulGroup.Add(m_clientFronthaulDevices[c]);
-    }
-
-    addr.SetBase("10.2.0.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifFh = addr.Assign(fronthaulGroup);
-    for (uint32_t a = 0; a < m_numAgents; ++a)
-    {
-        m_agentFronthaulIp[a] = ifFh.GetAddress(a);
-        m_agentFronthaulIfIndex[a] = ifFh.Get(a).second;
-    }
-    for (uint32_t c = 0; c < m_numClients; ++c)
-    {
-        m_clientIp[c] = ifFh.GetAddress(m_numAgents + c);
-        m_clientFronthaulIfIndex[c] = ifFh.Get(m_numAgents + c).second;
-    }
-
-    auto ctrlRouting = staticRoutingHelper.GetStaticRouting(m_controllerNode.Get(0)->GetObject<Ipv4>());
-    for (uint32_t a = 0; a < m_numAgents; ++a)
-    {
-        auto agentIpv4 = m_agentNodes.Get(a)->GetObject<Ipv4>();
-        agentIpv4->SetForwarding(m_agentBackhaulIfIndex[a], true);
-        agentIpv4->SetForwarding(m_agentFronthaulIfIndex[a], true);
-
-        auto agentRouting = staticRoutingHelper.GetStaticRouting(agentIpv4);
-        agentRouting->SetDefaultRoute(parentBhIp[a], m_agentBackhaulIfIndex[a]);
-    }
-
-    (void) children;
-    (void) ctrlRouting;
-    RebuildClientRoutes();
-
-    NS_LOG_INFO("=== END Protocol Stack ===");
-}
-
-void 
+void
 EasyMeshSimulation::InstallUdpUplink()
 {
     UdpServerHelper server(PORT_UDP_UL);
@@ -1046,7 +1269,7 @@ EasyMeshSimulation::InstallUdpUplink()
 
     for (uint32_t c = 0; c < m_numClients; c++)
     {
-        UdpClientHelper client(m_controllerBackhaulIp[m_clientToAgent[c]], PORT_UDP_UL);
+        UdpClientHelper client(m_controllerIp, PORT_UDP_UL);
         client.SetAttribute("MaxPackets", UintegerValue(UINT32_MAX));
         client.SetAttribute("Interval", TimeValue(MicroSeconds(intervalUs)));
         client.SetAttribute("PacketSize", UintegerValue(UL_PKT_SIZE));
@@ -1059,7 +1282,7 @@ EasyMeshSimulation::InstallUdpUplink()
     }
 }
 
-void 
+void
 EasyMeshSimulation::InstallUdpDownlink()
 {
     for (uint32_t c = 0; c < m_numClients; c++) {
@@ -1087,7 +1310,7 @@ EasyMeshSimulation::InstallUdpDownlink()
     }
 }
 
-void 
+void
 EasyMeshSimulation::InstallTcpUplink()
 {
     PacketSinkHelper tcpSink("ns3::TcpSocketFactory",
@@ -1109,24 +1332,24 @@ EasyMeshSimulation::InstallTcpUplink()
     }
 }
 
-void 
-EasyMeshSimulation::InstallBackhaulStress()
-{
-    NS_LOG_INFO("BackhaulStress disabled (only 2 agents)");
-}
-
-void 
+void
 EasyMeshSimulation::InstallApplications()
 {
     NS_LOG_INFO("=== InstallApplications ===");
     InstallUdpUplink();
-    NS_LOG_INFO("Applications installed: " << m_numClients << " UDP uplink flow(s)");
+    InstallUdpDownlink();
+    NS_LOG_INFO("Applications installed: " << m_numClients << " UDP uplink + downlink flow pair(s)");
 }
 
+// ════════════════════════════════════════════════════════════════
+//  Animation, scheduling, run, results
+// ════════════════════════════════════════════════════════════════
+
 void
-EasyMeshSimulation::UpdateAnimationNodes(AnimationInterface* anim)
+EasyMeshSimulation::UpdateAnimationNodes()
 {
-    NS_ASSERT(anim);
+    if (!m_animation) return;
+    auto anim = m_animation;
 
     anim->UpdateNodeDescription(m_controllerNode.Get(0), "Controller");
     anim->UpdateNodeColor(m_controllerNode.Get(0), 0, 102, 204);
@@ -1142,14 +1365,11 @@ EasyMeshSimulation::UpdateAnimationNodes(AnimationInterface* anim)
         }
         else
         {
-            name << "Agent " << a << " UL->";
-            if (m_agentParent[a] < 0)
+            name << "Agent " << a << " UL->"
+                 << (m_agentParent[a] < 0 ? std::string("C") : "A" + std::to_string(m_agentParent[a]));
+            for (const auto& radio : m_agents[a]->GetRadios())
             {
-                name << "C";
-            }
-            else
-            {
-                name << "A" << m_agentParent[a];
+                name << " " << BandStr(radio->GetBand()) << ":" << radio->GetChannel().number;
             }
             anim->UpdateNodeColor(m_agentNodes.Get(a), 46, 204, 113);
         }
@@ -1160,131 +1380,59 @@ EasyMeshSimulation::UpdateAnimationNodes(AnimationInterface* anim)
     for (uint32_t c = 0; c < m_numClients; ++c)
     {
         std::ostringstream name;
-        if (m_clientToAgent[c] < m_numAgents)
-        {
-            name << "STA " << c << " -> A" << m_clientToAgent[c];
-        }
+        auto radio = m_controller->GetServingRadio(c);
+        name << "STA " << c << " -> ";
+        if (radio)
+            name << "A" << radio->GetAgentId() << "/" << BandStr(radio->GetBand());
         else
-        {
-            name << "STA " << c << " -> none";
-        }
+            name << "none";
         anim->UpdateNodeDescription(m_clientNodes.Get(c), name.str());
         anim->UpdateNodeColor(m_clientNodes.Get(c), 231, 126, 35);
         anim->UpdateNodeSize(m_clientNodes.Get(c), 1.0, 1.0);
     }
 }
 
-void 
-EasyMeshSimulation::UpdateAnimationLinks(AnimationInterface* anim)
-{
-    NS_ASSERT(anim);
-
-    for (const auto& link : m_links)
-    {
-        std::ostringstream label;
-        if (link->GetType() == LinkType::BACKHAUL)
-        {
-            uint32_t childAgent = 0;
-            for (; childAgent < m_numAgents; ++childAgent)
-            {
-                if (m_agentNodes.Get(childAgent) == link->GetDst())
-                {
-                    break;
-                }
-            }
-
-            if (link->GetSrc() == m_controllerNode.Get(0))
-            {
-                label << "UL A" << childAgent << "->C";
-            }
-            else
-            {
-                uint32_t parentAgent = 0;
-                for (; parentAgent < m_numAgents; ++parentAgent)
-                {
-                    if (m_agentNodes.Get(parentAgent) == link->GetSrc())
-                    {
-                        break;
-                    }
-                }
-                label << "UL A" << childAgent << "->A" << parentAgent;
-            }
-        }
-        else
-        {
-            uint32_t agentId = 0;
-            uint32_t clientId = 0;
-            for (; agentId < m_numAgents; ++agentId)
-            {
-                if (m_agentNodes.Get(agentId) == link->GetSrc())
-                {
-                    break;
-                }
-            }
-            for (; clientId < m_numClients; ++clientId)
-            {
-                if (m_clientNodes.Get(clientId) == link->GetDst())
-                {
-                    break;
-                }
-            }
-            label << "FH A" << agentId << "-STA" << clientId;
-        }
-
-        if (!link->IsActive())
-        {
-            label << " OFFLINE";
-        }
-        label << " RSSI=" << std::fixed << std::setprecision(1) << link->GetRssi() << "dBm";
-        anim->UpdateLinkDescription(link->GetSrc(), link->GetDst(), label.str());
-    }
-}
-
-void 
-EasyMeshSimulation::ConfigureAnimation(AnimationInterface& anim)
-{
-    anim.SetStartTime(Seconds(UL_START));
-    anim.SetStopTime(Seconds(m_duration));
-    anim.SetMobilityPollInterval(Seconds(1.0));
-    anim.SetMaxPktsPerTraceFile(200000);
-    anim.SkipPacketTracing();
-
-    UpdateAnimationNodes(&anim);
-
-    Simulator::Schedule(Seconds(UL_START),
-                        &EasyMeshSimulation::UpdateAnimationLinks,
-                        this,
-                        &anim);
-
-}
-
-void 
+void
 EasyMeshSimulation::ScheduleEvents()
 {
-    Simulator::Schedule(Seconds(1.0),
-                        &EasyMeshSimulation::SyncClientAssociations,
-                        this);
-    Simulator::Schedule(Seconds(1.5),
-                        &EasyMeshSimulation::SyncClientAssociations,
-                        this);
+    for (double t = METRICS_INTERVAL; t < m_duration; t += METRICS_INTERVAL)
+        Simulator::Schedule(Seconds(t), &EasyMeshController::CollectApMetrics, m_controller);
+
+    for (double t = UL_START + STEERING_INTERVAL; t < m_duration; t += STEERING_INTERVAL)
+        Simulator::Schedule(Seconds(t), &EasyMeshController::RunSteeringEngine, m_controller);
+
+    if (m_roaming)
+    {
+        for (double t = UL_START; t < m_duration; t += ROAM_CHECK_INTERVAL)
+            Simulator::Schedule(Seconds(t), &EasyMeshSimulation::CheckRoaming, this);
+    }
+
+    if (m_channelPlanMode == ChannelPlanMode::DYNAMIC)
+    {
+        for (double t = CHANNEL_PLAN_INTERVAL; t < m_duration; t += CHANNEL_PLAN_INTERVAL)
+            Simulator::Schedule(Seconds(t), &EasyMeshController::PlanChannels, m_controller, false);
+    }
+
+    if (m_netOpt)
+    {
+        for (double t = NETOPT_INTERVAL; t < m_duration; t += NETOPT_INTERVAL)
+            Simulator::Schedule(Seconds(t), &EasyMeshSimulation::OptimizeBackhaul, this,
+                                false, SteeringReason::BACKHAUL_OPT);
+    }
+
     if (m_offlineTime > UL_START && m_offlineTime < m_duration)
     {
         Simulator::Schedule(Seconds(m_offlineTime),
                             &EasyMeshSimulation::HandleAgentOffline,
                             this);
+        if (m_recoverTime > m_offlineTime && m_recoverTime < m_duration)
+        {
+            Simulator::Schedule(Seconds(m_recoverTime), &EasyMeshSimulation::HandleAgentRecover, this);
+        }
     }
-    for (double t = 5.0; t < m_duration; t += 5.0)
-        Simulator::Schedule(Seconds(t),
-            &EasyMeshController::CollectApMetrics, m_controller);
-    for (double t = 10.0; t < m_duration; t += 10.0)
-        Simulator::Schedule(Seconds(t),
-            &EasyMeshController::RunSteeringEngine, m_controller);
-    for (double t = 20.0; t < m_duration; t += 20.0)
-        Simulator::Schedule(Seconds(t),
-            &EasyMeshController::OptimizeBackhaulTopology, m_controller);
 }
 
-void 
+void
 EasyMeshSimulation::Run()
 {
     NS_LOG_INFO("=== Simulation start  duration=" << m_duration << "s ===");
@@ -1292,16 +1440,20 @@ EasyMeshSimulation::Run()
     std::ostringstream animationFile;
     animationFile << "easymesh-sim-animation-run" << m_scenarioRun << ".xml";
     AnimationInterface anim(animationFile.str());
+    anim.SetStartTime(Seconds(UL_START));
+    anim.SetStopTime(Seconds(m_duration));
+    anim.SetMobilityPollInterval(Seconds(1.0));
+    anim.SetMaxPktsPerTraceFile(200000);
+    anim.SkipPacketTracing();
     m_animation = &anim;
-    ConfigureAnimation(anim);
-    if (m_pcap) m_phyHelper.EnablePcapAll("easymesh");
+    UpdateAnimationNodes();
+
     Simulator::Stop(Seconds(m_duration + 2.0));
     Simulator::Run();
 
     Ptr<Ipv4FlowClassifier> clf =
         DynamicCast<Ipv4FlowClassifier>(m_monHelper.GetClassifier());
     m_trafficStats.Collect(m_monitor, clf);
-    m_controller->ApplyTrafficStats(m_trafficStats);
 
     m_animation = nullptr;
     Simulator::Destroy();
@@ -1309,13 +1461,14 @@ EasyMeshSimulation::Run()
     NS_LOG_INFO("=== Simulation complete ===");
 }
 
-void 
+void
 EasyMeshSimulation::PrintResults()
 {
     m_controller->PrintTopology();
+    m_controller->PrintChannelPlan();
     m_controller->PrintSteeringLog();
-    m_trafficStats.PrintPerFlowTable();
-    m_controller->PrintAgentTraffic();
+    if (PRINT_PER_FLOW) m_trafficStats.PrintPerFlowTable();
+    m_controller->PrintRadioTraffic(m_duration - UL_START);
     m_trafficStats.PrintNetworkSummary();
 }
 
@@ -1326,12 +1479,19 @@ int main(int argc, char* argv[])
 
     double   duration   = DURATION;
     uint32_t scenarioRuns = SCENARIO_RUNS;
-    uint32_t numClients = NUM_STA;          
+    uint32_t numClients = NUM_STA;
     uint32_t numAgents  = NUM_AGENT;
     std::string offlineAgentsStr = std::to_string(OFFLINE_AGENT_ID); // comma-separated, e.g. "1,3,5"
     double   offlineTime = OFFLINE_TIME;
+    double   recoverTime = RECOVER_TIME;
     bool     pcap       = false;
     std::string mstMetricStr = "throughput";   // "throughput" | "rssi"
+    std::string channelPlanStr = "dynamic";    // "none" | "static" | "dynamic"
+    bool     steering   = true;
+    bool     roaming    = true;
+    bool     loadBalancing = true;
+    bool     netOpt     = true;
+    double   staSpeed   = STA_MAX_SPEED;
 
     CommandLine cmd;
     cmd.AddValue("duration", "Simulation duration (s)", duration);
@@ -1340,8 +1500,15 @@ int main(int argc, char* argv[])
     cmd.AddValue("agents",   "Number of Agents (APs)",  numAgents);
     cmd.AddValue("offlineAgents", "Comma-separated agent ids to take offline during the run (e.g. 1,3,5)", offlineAgentsStr);
     cmd.AddValue("offlineTime", "Time in seconds when the agent(s) go offline", offlineTime);
+    cmd.AddValue("recoverTime", "Time in seconds when the offline agent(s) come back (<0: never)", recoverTime);
     cmd.AddValue("pcap",     "Enable PCAP capture",     pcap);
     cmd.AddValue("mstMetric", "Backhaul MST edge metric: throughput | rssi", mstMetricStr);
+    cmd.AddValue("channelPlan", "Fronthaul channel planning: none | static | dynamic", channelPlanStr);
+    cmd.AddValue("steering", "Controller client + band steering", steering);
+    cmd.AddValue("roaming", "STA-initiated roaming", roaming);
+    cmd.AddValue("loadBalancing", "Controller load balancing", loadBalancing);
+    cmd.AddValue("netOpt", "Periodic backhaul (network) optimization", netOpt);
+    cmd.AddValue("staSpeed", "Max STA speed in m/s (0 = static clients)", staSpeed);
     cmd.Parse(argc, argv);
 
     MstMetric mstMetric = MstMetric::THROUGHPUT;
@@ -1353,6 +1520,21 @@ int main(int argc, char* argv[])
     {
         std::cerr << "Unknown --mstMetric '" << mstMetricStr
                   << "' (expected 'throughput' or 'rssi'); defaulting to 'throughput'\n";
+    }
+
+    ChannelPlanMode channelPlan = ChannelPlanMode::DYNAMIC;
+    if (channelPlanStr == "none")
+    {
+        channelPlan = ChannelPlanMode::NONE;
+    }
+    else if (channelPlanStr == "static")
+    {
+        channelPlan = ChannelPlanMode::STATIC;
+    }
+    else if (channelPlanStr != "dynamic")
+    {
+        std::cerr << "Unknown --channelPlan '" << channelPlanStr
+                  << "' (expected none | static | dynamic); defaulting to 'dynamic'\n";
     }
 
     // Parse "1,3,5" -> {1, 3, 5}, skipping blanks/whitespace.
@@ -1385,8 +1567,10 @@ int main(int argc, char* argv[])
     for (uint32_t run = 1; run <= scenarioRuns; ++run)
     {
         std::cout << "\n=== Scenario " << run << "/" << scenarioRuns
-                  << "  [mstMetric=" << mstMetricStr << ", offlineAgents=" << offlineAgentsStr
-                  << "] ===\n" << std::flush;
+                  << "  [mstMetric=" << mstMetricStr << ", channelPlan=" << channelPlanStr
+                  << ", steering=" << steering << ", roaming=" << roaming
+                  << ", loadBalancing=" << loadBalancing << ", netOpt=" << netOpt
+                  << ", offlineAgents=" << offlineAgentsStr << "] ===\n" << std::flush;
         RngSeedManager::SetRun(run);
 
         EasyMeshSimulation sim;
@@ -1396,8 +1580,15 @@ int main(int argc, char* argv[])
         sim.SetNumAgents(numAgents);
         sim.SetOfflineAgentIds(offlineAgentIds);
         sim.SetOfflineTime(offlineTime);
+        sim.SetRecoverTime(recoverTime);
         sim.EnablePcap(pcap);
         sim.SetMstMetric(mstMetric);
+        sim.SetChannelPlanMode(channelPlan);
+        sim.EnableSteering(steering);
+        sim.EnableRoaming(roaming);
+        sim.EnableLoadBalancing(loadBalancing);
+        sim.EnableNetworkOptimization(netOpt);
+        sim.SetStaMaxSpeed(staSpeed);
 
         sim.BuildTopology();
         sim.InstallProtocolStack();

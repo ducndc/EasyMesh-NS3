@@ -22,24 +22,27 @@ A Wi-Fi EasyMesh network simulation built on [ns-3](https://www.nsnam.org/), mod
 ## Project Structure
 
 ```
-EasyMesh-NS3/
-├── easymesh.cc              # Simulation entry point (main()), topology/build orchestration
-├── easymesh.h
-├── parameters.h             # Tunable simulation constants (topology, traffic, thresholds)
-├── CMakeLists.txt           # Scratch build definition (custom target: easymesh_sim)
-└── lib/
-    ├── easymesh-agent.cc/.h        # Agent (AP) model
-    ├── easymesh-controller.cc/.h   # Controller: steering engine, topology optimization, reporting
-    ├── easymesh-link.cc/.h         # Backhaul/fronthaul link model
-    └── traffic-stats.h             # FlowMonitor collection & statistics printing
+EasyMesh-NS3/                    # mirrors an ns-3 scratch/ directory
+├── CMakeLists.txt               # ns-3's stock scratch/CMakeLists.txt
+├── Docs/                        # LaTeX report on EasyMesh concepts (not built)
+└── easymesh/
+    ├── easymesh.cc              # Simulation entry point (main()), topology/build orchestration
+    ├── easymesh.h
+    ├── parameters.h             # Tunable simulation constants (topology, traffic, thresholds)
+    ├── CMakeLists.txt           # Scratch build definition (custom target: easymesh_sim)
+    └── lib/
+        ├── easymesh-agent.cc/.h        # Agent (AP) model
+        ├── easymesh-controller.cc/.h   # Controller: steering engine, topology optimization, reporting
+        ├── easymesh-link.cc/.h         # Backhaul/fronthaul link model
+        └── traffic-stats.h             # FlowMonitor collection & statistics printing
 ```
 
 ## Setup
 
-Copy the project into your ns-3 `scratch/` directory **as a subdirectory** (this preserves the `lib/` layout and custom `CMakeLists.txt` that the build depends on):
+Copy the `easymesh/` folder into your ns-3 `scratch/` directory (this preserves the `lib/` layout and custom `CMakeLists.txt` that the build depends on). The repo's top-level `CMakeLists.txt` is identical to the one ns-3 already ships in `scratch/`, so it does not need to be copied:
 
 ```bash
-cp -r EasyMesh-NS3 ns-3.46.1/scratch/easymesh
+cp -r EasyMesh-NS3/easymesh ns-3.46.1/scratch/
 ```
 
 ## Build
@@ -77,7 +80,7 @@ cd ns-3.46.1
 | `--duration`      | double | `15.0`         | Simulation duration in seconds                              |
 | `--scenarios`     | uint32 | `1`            | Number of randomized scenario runs                          |
 | `--clients`       | uint32 | `1`            | Number of STA clients                                       |
-| `--agents`        | uint32 | `10`           | Number of Agents (APs) in the backhaul mesh                  |
+| `--agents`        | uint32 | `15`           | Number of Agents (APs) in the backhaul mesh                  |
 | `--offlineAgents`  | string | `1`            | Comma-separated agent IDs to take offline mid-run (e.g. `1,3,5`) |
 | `--offlineTime`   | double | `6.0`          | Simulation time (s) at which the listed agent(s) go offline    |
 | `--pcap`          | bool   | `false`        | Enable PCAP capture                                          |

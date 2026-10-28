@@ -9,14 +9,17 @@
 #include "ns3/applications-module.h"
 #include "ns3/flow-monitor-module.h"
 #include "ns3/netanim-module.h"
-#include "ns3/csma-module.h"
+#include "ns3/propagation-module.h"
+#include "ns3/spectrum-module.h"
 #include "ns3/on-off-helper.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/bulk-send-helper.h"
-#include "ns3/bridge-module.h"
 
+#include "lib/easymesh-types.h"
 #include "lib/easymesh-link.h"
+#include "lib/easymesh-radio.h"
 #include "lib/easymesh-agent.h"
+#include "lib/easymesh-assoc-manager.h"
 #include "lib/easymesh-controller.h"
 #include "lib/traffic-stats.h"
 #include "parameters.h"
@@ -26,8 +29,14 @@
 
 using namespace ns3;
 
-// ── MST edge-weight strategy for BuildBackhaulTree() ───────────
+// ── MST edge-weight strategy for ComputeBackhaulTree() ─────────
 enum class MstMetric { THROUGHPUT, RSSI };
+
+// ── Fronthaul channel planning mode ────────────────────────────
+//   NONE    – every radio on the first channel of its band (baseline)
+//   STATIC  – interference-graph plan computed once before start
+//   DYNAMIC – STATIC plus periodic re-planning from measured utilization
+enum class ChannelPlanMode { NONE, STATIC, DYNAMIC };
 
 class EasyMeshSimulation {
 public:
@@ -37,120 +46,143 @@ public:
     // ── Build phases ──────────────────────────────────────────
     void BuildTopology();
     void InstallProtocolStack();
-    void InstallApplications();     // ← UDP CBR + TCP bulk + BH stress
+    void InstallApplications();     // ← UDP CBR uplink + downlink
     void ScheduleEvents();
     void Run();
-    void PrintResults();            // ← topology + steering + flow stats
-    void ConfigureAnimation(AnimationInterface& anim);
-    void UpdateAnimationLinks(AnimationInterface* anim);
+    void PrintResults();            // ← topology + channels + transitions + flow stats
 
     // ── CLI overrides ─────────────────────────────────────────
     void SetDuration(double s)   { m_duration   = s; }
     void SetScenarioRun(uint32_t run) { m_scenarioRun = run; }
-    void SetOfflineAgentId(uint32_t agentId) { m_offlineAgentIds = { agentId }; }
     void SetOfflineAgentIds(std::vector<uint32_t> agentIds) { m_offlineAgentIds = std::move(agentIds); }
     void SetOfflineTime(double timeSeconds) { m_offlineTime = timeSeconds; }
-    void SetNumClients(uint32_t n)
-    {
-        m_numClients = n;
-        m_clientIp.resize(n, Ipv4Address::GetAny());
-        m_clientToAgent.resize(n, 0);
-        m_clientFronthaulDevices.resize(n);
-        m_clientFronthaulIfIndex.resize(n, 0);
-    }
-    void SetNumAgents(uint32_t n)
-    {
-        m_numAgents = n;
-        m_controllerBackhaulIp.resize(n, Ipv4Address::GetAny());
-        m_agentIp.resize(n, Ipv4Address::GetAny());
-        m_agentFronthaulIp.resize(n, Ipv4Address::GetAny());
-        m_agentFronthaulDevices.resize(n);
-        m_parentIfIndex.resize(n, 0);
-        m_agentBackhaulIfIndex.resize(n, 0);
-        m_agentFronthaulIfIndex.resize(n, 0);
-        m_agentPositions.resize(n, CONTROLLER_POS);
-        m_agentParent.resize(n, -1);
-        m_agentOnline.resize(n, true);
-    }
+    void SetRecoverTime(double timeSeconds) { m_recoverTime = timeSeconds; }
+    void SetNumClients(uint32_t n);
+    void SetNumAgents(uint32_t n);
     void EnablePcap(bool e)      { m_pcap       = e; }
     void SetMstMetric(MstMetric m) { m_mstMetric = m; }
+    void SetChannelPlanMode(ChannelPlanMode m) { m_channelPlanMode = m; }
+    void EnableSteering(bool e)        { m_steering = e; }
+    void EnableRoaming(bool e)         { m_roaming = e; }
+    void EnableLoadBalancing(bool e)   { m_loadBalancing = e; }
+    void EnableNetworkOptimization(bool e) { m_netOpt = e; }
+    void SetStaMaxSpeed(double v)      { m_staMaxSpeed = v; }
 
     double ComputeDistance(Vector a, Vector b) const;
 
 private:
+    // One STA whose BSS membership the simulation manages:
+    // a client STA, or the backhaul STA (bSTA) of an Agent.
+    struct ManagedSta {
+        Ptr<WifiNetDevice>         device;
+        Ptr<StaWifiMac>            mac;
+        Ptr<EasyMeshAssocManager>  assocMgr;
+        bool                       isBackhaul = false;
+        uint32_t                   ownerId    = 0;   // client id or agent id
+
+        // in-flight BSS transition
+        bool         pending  = false;
+        Mac48Address target;
+        EmChannel    targetChannel;
+        Time         start;
+        EventId      hopEvent;
+        EventId      timeoutEvent;
+        uint32_t     hopTries = 0;
+        SteeringEvent ev;
+    };
+
+    // Who owns a BSSID
+    struct BssInfo {
+        int32_t agentId;    // -1 = Controller
+        bool    backhaul;
+        EmBand  band;
+    };
+
     // ── Topology builders ─────────────────────────────────────
     void CreateNodes();
     void InstallMobility();
-    void CreateWifiChannels();
-    void CreateBackhaulLinks();
-    void CreateFronthaulLinks();
-    void CreateEthernetBackhaul();
-    void AssignClientsToAgents();
+    void CreateSpectrumChannels();
+    void InstallBackhaulDevices();
+    void InstallFronthaulDevices();
+    void InstallClientDevices();
     void GenerateRandomAgentPositions();
     void OptimizeNetworkTopology();
-    void BuildBackhaulTree();
-    uint32_t SelectBestUplinkAgent(uint32_t clientId) const;
-    Ptr<EasyMeshLink> FindBackhaulLinkForAgent(uint32_t agentId) const;
-    Ptr<EasyMeshLink> FindFronthaulLinkForClient(uint32_t clientId) const;
-    double EstimateLinkRssi(Vector a, Vector b) const;
-    double EstimateLinkThroughput(double rssi) const;
+    std::vector<int32_t> ComputeBackhaulTree() const;
+    double TreeWeight(const std::vector<int32_t>& parents) const;
+    double EdgeWeight(Vector a, Vector b) const;
+    Ptr<EasyMeshRadio> SelectInitialRadio(uint32_t clientId) const;
+
+    // ── Radio estimates (same log-distance model as the channels) ──
+    double EstimateRssi(Vector a, Vector b, EmBand band) const;
+    double ClientRssi(uint32_t clientId, Ptr<EasyMeshRadio> radio) const;
+    double RadioRssi(Ptr<EasyMeshRadio> a, Ptr<EasyMeshRadio> b) const;
+    static double PhyRateMbps(double rssiDbm, uint16_t widthMhz);
+    static uint32_t RssiToMcs(double rssiDbm, uint16_t widthMhz);
     Vector GetAgentPosition(uint32_t agentId) const;
+    Vector GetClientPosition(uint32_t clientId) const;
     bool IsAgentOnline(uint32_t agentId) const;
-    uint32_t FindAgentForFronthaulBssid(Mac48Address bssid) const;
-    void UpdateClientAssociation(uint32_t clientId, uint32_t agentId);
-    void RebuildClientRoutes();
-    void SyncClientAssociations();
-    void RefreshBackhaulLinks();
+    Mac48Address BackhaulBssid(int32_t parent) const;
+
+    // ── BSS transitions (steering, roaming, backhaul re-parenting) ──
+    void StartTransition(uint32_t staIdx, Mac48Address bssid, const EmChannel& channel,
+                         const SteeringEvent& ev);
+    void HopToTarget(uint32_t staIdx);
+    void OnTransitionTimeout(uint32_t staIdx);
+    void FinishTransition(uint32_t staIdx, bool success);
+    void OnStaAssoc(uint32_t staIdx, Mac48Address bssid);
+    void OnStaDeAssoc(uint32_t staIdx, Mac48Address bssid);
+    bool SteerClient(uint32_t clientId, Ptr<EasyMeshRadio> target, SteeringReason reason);
+    void SwitchRadioChannel(Ptr<EasyMeshRadio> radio, const EmChannel& channel);
+    void ReparentAgent(uint32_t agentId, int32_t newParent, SteeringReason reason);
+    uint32_t BstaIndex(uint32_t agentId) const { return m_numClients + agentId; }
+
+    // ── Periodic / event handlers ─────────────────────────────
+    void CheckRoaming();
+    void OptimizeBackhaul(bool force, SteeringReason reason);
     void HandleAgentOffline();
-    void UpdateAnimationNodes(AnimationInterface* anim);
+    void HandleAgentRecover();
+    void SetAgentRadiosPower(uint32_t agentId, bool on);
+    void UpdateBackhaulMetrics();
+    void RebuildRoutes();
+    uint32_t AssignIpv4(Ptr<Node> node, Ptr<NetDevice> dev, Ipv4Address addr);
+    void UpdateAnimationNodes();
 
     // ── Traffic installers ────────────────────────────────────
     void InstallUdpUplink();        // STA → Controller  (CBR)
     void InstallUdpDownlink();      // Controller → STA  (CBR)
     void InstallTcpUplink();        // STA (even) → Controller (BulkSend)
-    void InstallBackhaulStress();   // Agent → Agent 0   (UDP CBR)
 
     // ── NS-3 containers ──────────────────────────────────────
     NodeContainer m_controllerNode;
     NodeContainer m_agentNodes;
     NodeContainer m_clientNodes;
 
-    NetDeviceContainer m_ethDevices;
-    NetDeviceContainer m_backhaulDevices;
-    NetDeviceContainer m_fronthaulDevices;
-    std::vector<Ptr<NetDevice>> m_agentFronthaulDevices;
-    std::vector<Ptr<NetDevice>> m_clientFronthaulDevices;
+    Ptr<MultiModelSpectrumChannel> m_channel24;
+    Ptr<MultiModelSpectrumChannel> m_channel5;
 
-    Ipv4InterfaceContainer m_ctrlIfaces;        // eth segment
-    Ipv4InterfaceContainer m_backhaulIfaces;
-    std::vector<Ipv4InterfaceContainer> m_fronthaulIfaces; // one per agent
+    Ptr<WifiNetDevice>              m_ctrlBap;      // Controller backhaul BSS
+    std::vector<Ptr<WifiNetDevice>> m_agentBap;     // Agent backhaul BSS (for children)
+    std::vector<ManagedSta>         m_stas;         // [clients..., agent bSTAs...]
+    std::map<Mac48Address, BssInfo> m_bssMap;
 
     // IP address bookkeeping
-    Ipv4Address m_controllerIp;
-    std::vector<Ipv4Address> m_controllerBackhaulIp;
-    std::vector<Ipv4Address> m_agentIp;     // backhaul side
-    std::vector<Ipv4Address> m_agentFronthaulIp;
-    std::vector<Ipv4Address> m_clientIp;    // fronthaul side
-    std::vector<uint32_t>    m_clientToAgent;
-    std::vector<uint32_t>    m_parentIfIndex;
-    std::vector<uint32_t>    m_agentBackhaulIfIndex;
-    std::vector<uint32_t>    m_agentFronthaulIfIndex;
-    std::vector<uint32_t>    m_clientFronthaulIfIndex;
+    Ipv4Address              m_controllerIp;
+    uint32_t                 m_ctrlBapIf = 0;
+    std::vector<Ipv4Address> m_agentBapIp;
+    std::vector<uint32_t>    m_agentBapIf;
+    std::vector<Ipv4Address> m_agentBstaIp;
+    std::vector<uint32_t>    m_agentBstaIf;
+    std::vector<Ipv4Address> m_clientIp;
+    std::vector<uint32_t>    m_clientIf;
+
     std::vector<Vector>      m_agentPositions;
-    std::vector<int32_t>     m_agentParent;
+    std::vector<int32_t>     m_agentParent;     // parent the bSTA is associated with
+    std::vector<int32_t>     m_plannedParent;   // parent chosen by the backhaul MST
     std::vector<bool>        m_agentOnline;
 
     // ── EasyMesh logical objects ──────────────────────────────
     Ptr<EasyMeshController>          m_controller;
     std::vector<Ptr<EasyMeshAgent>>  m_agents;
-    std::vector<Ptr<EasyMeshLink>>   m_links;
-
-    // ── Wi-Fi helpers (backhaul) ──────────────────────────────
-    WifiHelper          m_wifiHelper;
-    WifiMacHelper       m_macHelper;
-    YansWifiPhyHelper   m_phyHelper;
-    YansWifiChannelHelper m_channelHelper;
-    Ptr<YansWifiChannel> m_sharedWifiChannel;
 
     // ── FlowMonitor ───────────────────────────────────────────
     Ptr<FlowMonitor>   m_monitor;
@@ -164,8 +196,15 @@ private:
     uint32_t m_scenarioRun = 1;
     std::vector<uint32_t> m_offlineAgentIds = { OFFLINE_AGENT_ID };
     double   m_offlineTime = OFFLINE_TIME;
+    double   m_recoverTime = RECOVER_TIME;
     bool     m_pcap       = false;
     MstMetric m_mstMetric = MstMetric::THROUGHPUT;
+    ChannelPlanMode m_channelPlanMode = ChannelPlanMode::DYNAMIC;
+    bool     m_steering      = true;
+    bool     m_roaming       = true;
+    bool     m_loadBalancing = true;
+    bool     m_netOpt        = true;
+    double   m_staMaxSpeed   = STA_MAX_SPEED;
     AnimationInterface* m_animation = nullptr;
 
     // ── Static topology ───────────────────────────────────────

@@ -1,13 +1,17 @@
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib)
+
 # Create a custom library
 add_library(
   easymesh-lib
   lib/easymesh-agent.cc
+  lib/easymesh-assoc-manager.cc
   lib/easymesh-controller.cc
   lib/easymesh-link.cc
+  lib/easymesh-radio.cc
+  lib/channel-planner.cc
 )
-
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib)
+target_link_libraries(easymesh-lib ${libcore} ${ns3-libs})
 
 # Link the custom library to the scratch executable
 build_exec(
