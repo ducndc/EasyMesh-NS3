@@ -5,13 +5,31 @@
 #include <sstream>
 #include <string>
 
-// ── Radio band of a fronthaul BSS ────────────────────────────────
-enum class EmBand { BAND_2_4GHZ, BAND_5GHZ };
+// ── Radio band of a BSS / affiliated link ────────────────────────
+enum class EmBand { BAND_2_4GHZ, BAND_5GHZ, BAND_6GHZ };
 
 inline const char*
 BandStr(EmBand band)
 {
-    return (band == EmBand::BAND_2_4GHZ) ? "2.4G" : "5G";
+    switch (band)
+    {
+    case EmBand::BAND_2_4GHZ: return "2.4G";
+    case EmBand::BAND_5GHZ:   return "5G";
+    case EmBand::BAND_6GHZ:   return "6G";
+    }
+    return "?";
+}
+
+inline const char*
+BandSettingsStr(EmBand band)
+{
+    switch (band)
+    {
+    case EmBand::BAND_2_4GHZ: return "BAND_2_4GHZ";
+    case EmBand::BAND_5GHZ:   return "BAND_5GHZ";
+    case EmBand::BAND_6GHZ:   return "BAND_6GHZ";
+    }
+    return "BAND_UNSPECIFIED";
 }
 
 // ── Operating channel (maps onto WifiPhy "ChannelSettings") ──────
@@ -24,8 +42,7 @@ struct EmChannel
     std::string ToSettings() const
     {
         std::ostringstream os;
-        os << "{" << number << ", " << widthMhz << ", "
-           << ((band == EmBand::BAND_2_4GHZ) ? "BAND_2_4GHZ" : "BAND_5GHZ") << ", 0}";
+        os << "{" << number << ", " << widthMhz << ", " << BandSettingsStr(band) << ", 0}";
         return os.str();
     }
 

@@ -1,6 +1,7 @@
 #include "easymesh-agent.h"
 
 #include <algorithm>
+#include <set>
 
 using namespace ns3;
 
@@ -23,12 +24,13 @@ EasyMeshAgent::GetRadio(EmBand band) const
 uint32_t
 EasyMeshAgent::GetClientCount() const
 {
-    uint32_t count = 0;
+    // An MLD client is listed on every link it has set up: count it once
+    std::set<uint32_t> clients;
     for (const auto& radio : m_radios)
     {
-        count += radio->GetClientCount();
+        clients.insert(radio->GetClients().begin(), radio->GetClients().end());
     }
-    return count;
+    return static_cast<uint32_t>(clients.size());
 }
 
 double

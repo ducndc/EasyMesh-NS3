@@ -16,7 +16,9 @@ NS_LOG_COMPONENT_DEFINE("EasyMeshController");
 EasyMeshController::EasyMeshController(uint32_t id, Ptr<Node> node)
     : m_id(id),
       m_node(node),
-      m_planner(std::vector<uint16_t> FH24_CHANNELS, std::vector<uint16_t> FH5_CHANNELS) {}
+      m_planner(std::vector<uint16_t> FH24_CHANNELS,
+                std::vector<uint16_t> FH5_CHANNELS,
+                std::vector<uint16_t> FH6_CHANNELS) {}
 
 void
 EasyMeshController::RegisterAgent(Ptr<EasyMeshAgent> agent)
@@ -35,16 +37,28 @@ EasyMeshController::GetAgent(uint32_t agentId) const
 // ── Topology database ───────────────────────────────────────────
 
 void
-EasyMeshController::NotifyClientAssociated(uint32_t clientId, Ptr<EasyMeshRadio> radio)
+EasyMeshController::NotifyClientAssociated(uint32_t clientId, std::vector<Ptr<EasyMeshRadio>> links)
 {
     auto& rec = m_clients.at(clientId);
-    if (rec.radio && rec.radio != radio)
+    DetachClient(clientId);
+    for (const auto& radio : links)
     {
-        rec.radio->RemoveClient(clientId);
+        radio->AddClient(clientId);
     }
-    radio->AddClient(clientId);
-    rec.radio      = radio;
+    rec.radio      = links.front();
+    rec.links      = std::move(links);
     rec.associated = true;
+}
+
+void
+EasyMeshController::DetachClient(uint32_t clientId)
+{
+    auto& rec = m_clients.at(clientId);
+    for (const auto& radio : rec.links)
+    {
+        radio->RemoveClient(clientId);
+    }
+    rec.links.clear();
 }
 
 void
@@ -98,6 +112,19 @@ EasyMeshController::GetServingRadio(uint32_t clientId) const
     return m_clients.at(clientId).radio;
 }
 
+const std::vector<Ptr<EasyMeshRadio>>&
+EasyMeshController::GetClientLinks(uint32_t clientId) const
+{
+    return m_clients.at(clientId).links;
+}
+
+bool
+EasyMeshController::IsServedBy(uint32_t clientId, Ptr<EasyMeshRadio> radio) const
+{
+    const auto& links = m_clients.at(clientId).links;
+    return std::find(links.begin(), links.end(), radio) != links.end();
+}
+
 // ── Selection helpers ───────────────────────────────────────────
 
 std::vector<Ptr<EasyMeshRadio>>
@@ -115,28 +142,100 @@ EasyMeshController::OnlineRadios() const
     return radios;
 }
 
+std::vector<Ptr<EasyMeshRadio>>
+EasyMeshController::CandidateRadios(uint32_t clientId) const
+{
+    const auto& caps = m_clients.at(clientId).caps;
+    std::vector<Ptr<EasyMeshRadio>> radios;
+    for (const auto& agent : m_agents)
+    {
+        if (!agent->IsOnline()) continue;
+        if (caps.mlo)
+        {
+            if (auto anchor = AnchorRadio(clientId, agent->GetId()))
+            {
+                radios.push_back(anchor);
+            }
+            continue;
+        }
+        for (const auto& radio : agent->GetRadios())
+        {
+            if (std::find(caps.bands.begin(), caps.bands.end(), radio->GetBand()) != caps.bands.end())
+            {
+                radios.push_back(radio);
+            }
+        }
+    }
+    return radios;
+}
+
+Ptr<EasyMeshRadio>
+EasyMeshController::AnchorRadio(uint32_t clientId, uint32_t agentId) const
+{
+    auto agent = GetAgent(agentId);
+    for (EmBand band : m_clients.at(clientId).caps.bands)
+    {
+        if (auto radio = agent ? agent->GetRadio(band) : nullptr)
+        {
+            return radio;
+        }
+    }
+    return nullptr;
+}
+
+bool
+EasyMeshController::SameBss(uint32_t clientId, Ptr<EasyMeshRadio> a, Ptr<EasyMeshRadio> b) const
+{
+    // An MLD client joins a whole AP MLD, i.e. all the radios of one Agent
+    return IsMloClient(clientId) ? a->GetAgentId() == b->GetAgentId() : a == b;
+}
+
+double
+EasyMeshController::LinkRate(uint32_t clientId, Ptr<EasyMeshRadio> radio) const
+{
+    const double rssi = m_ops.clientRssi(clientId, radio);
+    return m_ops.phyRate(rssi, radio->GetChannel().widthMhz,
+                         m_clients.at(clientId).caps.eht ? EHT_MAX_MCS : HE_MAX_MCS);
+}
+
 double
 EasyMeshController::RadioScore(uint32_t clientId, Ptr<EasyMeshRadio> radio) const
 {
     // Expected client throughput: link rate capped by the Agent's backhaul
     // path capacity, discounted by how busy the channel already is.
-    const double rssi = m_ops.clientRssi(clientId, radio);
-    const double rate = m_ops.phyRate(rssi, radio->GetChannel().widthMhz);
-    const double backhaul = GetAgent(radio->GetAgentId())->GetBackhaulCapacity();
-    return std::min(rate, backhaul) * (1.0 - 0.8 * radio->GetChanUtil());
+    const auto agent = GetAgent(radio->GetAgentId());
+    const double backhaul = agent->GetBackhaulCapacity();
+    const auto& caps = m_clients.at(clientId).caps;
+    if (!caps.mlo)
+    {
+        return std::min(LinkRate(clientId, radio), backhaul) * (1.0 - 0.8 * radio->GetChanUtil());
+    }
+
+    // MLD (STR): the links of the AP MLD carry traffic in parallel
+    double rate = 0.0;
+    for (EmBand band : caps.bands)
+    {
+        if (auto link = agent->GetRadio(band))
+        {
+            rate += LinkRate(clientId, link) * (1.0 - 0.8 * link->GetChanUtil());
+        }
+    }
+    return std::min(rate, backhaul);
 }
 
 Ptr<EasyMeshRadio>
 EasyMeshController::SelectBestRadio(uint32_t clientId,
                                     Ptr<EasyMeshRadio> exclude,
-                                    std::optional<EmBand> band,
+                                    BandFilter filter,
                                     double minRssiDbm) const
 {
     Ptr<EasyMeshRadio> best;
     double bestScore = -std::numeric_limits<double>::infinity();
-    for (const auto& radio : OnlineRadios())
+    for (const auto& radio : CandidateRadios(clientId))
     {
-        if (radio == exclude || (band && radio->GetBand() != *band)) continue;
+        if (exclude && SameBss(clientId, radio, exclude)) continue;
+        const bool low = radio->GetBand() == EmBand::BAND_2_4GHZ;
+        if ((filter == BandFilter::LOW && !low) || (filter == BandFilter::HIGH && low)) continue;
         if (m_ops.clientRssi(clientId, radio) < minRssiDbm) continue;
 
         const double score = RadioScore(clientId, radio);
@@ -158,7 +257,8 @@ EasyMeshController::Interference(Ptr<EasyMeshRadio> a, Ptr<EasyMeshRadio> b) con
 bool
 EasyMeshController::Steer(uint32_t clientId, Ptr<EasyMeshRadio> target, SteeringReason reason)
 {
-    if (!target || target == m_clients.at(clientId).radio)
+    const auto& serving = m_clients.at(clientId).radio;
+    if (!target || (serving && SameBss(clientId, target, serving)))
     {
         return false;
     }
@@ -214,7 +314,7 @@ EasyMeshController::RunSteeringEngine()
             // 1. Client steering: sticky client with poor signal
             if (rssi < STEER_RSSI_THRESHOLD)
             {
-                auto target = SelectBestRadio(c, serving, std::nullopt, MIN_ASSOC_RSSI_DBM);
+                auto target = SelectBestRadio(c, serving, BandFilter::ANY, MIN_ASSOC_RSSI_DBM);
                 if (target && m_ops.clientRssi(c, target) >= rssi + STEER_RSSI_GAIN_DB)
                 {
                     Steer(c, target, SteeringReason::RSSI_LOW);
@@ -222,15 +322,33 @@ EasyMeshController::RunSteeringEngine()
                 }
             }
 
-            // 2. Band steering
+            // 2. Band steering (an MLD client already uses all of its bands)
+            if (m_clients[c].caps.mlo)
+            {
+                continue;
+            }
             if (serving->GetBand() == EmBand::BAND_2_4GHZ)
             {
-                // prefer the 5 GHz radio of the same Agent, else the best 5 GHz BSS
-                auto agent  = GetAgent(serving->GetAgentId());
-                auto target = agent->GetRadio(EmBand::BAND_5GHZ);
-                if (!target || m_ops.clientRssi(c, target) < BAND_STEER_TO_5G_RSSI)
+                // prefer a 5 / 6 GHz radio of the same Agent, else the best 5 / 6 GHz BSS
+                Ptr<EasyMeshRadio> target;
+                double bestScore = -std::numeric_limits<double>::infinity();
+                for (const auto& radio : CandidateRadios(c))
                 {
-                    target = SelectBestRadio(c, serving, EmBand::BAND_5GHZ, BAND_STEER_TO_5G_RSSI);
+                    if (radio->GetAgentId() != serving->GetAgentId() ||
+                        radio->GetBand() == EmBand::BAND_2_4GHZ ||
+                        m_ops.clientRssi(c, radio) < BAND_STEER_TO_5G_RSSI)
+                    {
+                        continue;
+                    }
+                    if (RadioScore(c, radio) > bestScore)
+                    {
+                        bestScore = RadioScore(c, radio);
+                        target = radio;
+                    }
+                }
+                if (!target)
+                {
+                    target = SelectBestRadio(c, serving, BandFilter::HIGH, BAND_STEER_TO_5G_RSSI);
                 }
                 if (target && m_ops.clientRssi(c, target) >= BAND_STEER_TO_5G_RSSI)
                 {
@@ -239,7 +357,7 @@ EasyMeshController::RunSteeringEngine()
             }
             else if (rssi < BAND_STEER_TO_24_RSSI)
             {
-                auto target = SelectBestRadio(c, serving, EmBand::BAND_2_4GHZ, MIN_ASSOC_RSSI_DBM);
+                auto target = SelectBestRadio(c, serving, BandFilter::LOW, MIN_ASSOC_RSSI_DBM);
                 if (target && m_ops.clientRssi(c, target) >= rssi + STEER_RSSI_GAIN_DB)
                 {
                     Steer(c, target, SteeringReason::BAND_STEER);
@@ -272,11 +390,16 @@ EasyMeshController::RunLoadBalancing()
 
         for (uint32_t c : radio->GetClients())
         {
-            if (!IsTransitionAllowed(c) || m_clients[c].radio != radio) continue;
-            for (const auto& target : OnlineRadios())
+            if (!IsTransitionAllowed(c) || !IsServedBy(c, radio)) continue;
+            for (const auto& target : CandidateRadios(c))
             {
-                if (target == radio) continue;
-                if (target->GetChanUtil() > util - LB_UTIL_MARGIN) continue;
+                if (SameBss(c, target, radio)) continue;
+                // compare like with like: for an MLD client, the target AP
+                // MLD's link on the overloaded band
+                const auto peer = IsMloClient(c)
+                                      ? GetAgent(target->GetAgentId())->GetRadio(radio->GetBand())
+                                      : target;
+                if (!peer || peer->GetChanUtil() > util - LB_UTIL_MARGIN) continue;
                 if (m_ops.clientRssi(c, target) < LB_MIN_RSSI_DBM) continue;
 
                 const double score = RadioScore(c, target);
@@ -383,11 +506,11 @@ EasyMeshController::HandleAgentOffline(uint32_t agentId)
         auto serving = m_clients[c].radio;
         if (!serving || serving->GetAgentId() != agentId) continue;
 
-        serving->RemoveClient(c);
-        auto target = SelectBestRadio(c, nullptr, std::nullopt, MIN_ASSOC_RSSI_DBM);
+        DetachClient(c);
+        auto target = SelectBestRadio(c, nullptr, BandFilter::ANY, MIN_ASSOC_RSSI_DBM);
         if (!target)
         {
-            target = SelectBestRadio(c, nullptr, std::nullopt,
+            target = SelectBestRadio(c, nullptr, BandFilter::ANY,
                                      -std::numeric_limits<double>::infinity());
         }
         if (target)
@@ -424,6 +547,18 @@ EasyMeshController::PrintTopology() const
                       << "  Rate=" << l->GetThroughput() << "Mbps"
                       << "  PathCap=" << ag->GetBackhaulCapacity() << "Mbps"
                       << "  " << (l->IsActive() ? "ACTIVE" : "INACTIVE") << "\n";
+            if (l->GetAffiliatedLinks().size() > 1)
+            {
+                for (const auto& link : l->GetAffiliatedLinks())
+                {
+                    std::cout << "  │    MLO " << std::setw(4) << BandStr(link.channel.band)
+                              << " ch" << std::setw(3) << link.channel.number
+                              << "/" << link.channel.widthMhz << "MHz"
+                              << "  RSSI=" << link.rssi << "dBm"
+                              << "  MCS=" << link.mcs
+                              << "  Rate=" << link.rateMbps << "Mbps\n";
+                }
+            }
         }
 
         for (auto& r : ag->GetRadios())
@@ -505,10 +640,10 @@ EasyMeshController::PrintSteeringLog() const
         return;
     }
 
-    auto endpoint = [](bool backhaul, int32_t agent, EmBand band) {
+    auto endpoint = [](bool backhaul, bool mlo, int32_t agent, EmBand band) {
         if (agent < 0) return std::string(backhaul ? "C" : "-");
         std::string s = "A" + std::to_string(agent);
-        if (!backhaul) s += std::string("/") + BandStr(band);
+        if (!backhaul) s += std::string("/") + (mlo ? "MLD" : BandStr(band));
         return s;
     };
 
@@ -529,8 +664,8 @@ EasyMeshController::PrintSteeringLog() const
     {
         const std::string sta = ev.isBackhaul ? "bSTA" + std::to_string(ev.staId)
                                               : "STA" + std::to_string(ev.staId);
-        const std::string path = endpoint(ev.isBackhaul, ev.fromAgent, ev.fromBand) + " -> " +
-                                 endpoint(ev.isBackhaul, ev.toAgent, ev.toBand);
+        const std::string path = endpoint(ev.isBackhaul, ev.mlo, ev.fromAgent, ev.fromBand) + " -> " +
+                                 endpoint(ev.isBackhaul, ev.mlo, ev.toAgent, ev.toBand);
         std::cout << std::left
                   << std::setw(8)  << std::fixed << std::setprecision(2) << ev.timeS
                   << std::setw(8)  << sta

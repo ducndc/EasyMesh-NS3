@@ -4,13 +4,19 @@
 
 using namespace ns3;
 
-EasyMeshRadio::EasyMeshRadio(uint32_t agentId, EmBand band, Ptr<WifiNetDevice> device, EmChannel channel)
-    : m_agentId(agentId), m_band(band), m_device(device), m_channel(channel) {}
+EasyMeshRadio::EasyMeshRadio(uint32_t agentId,
+                             EmBand band,
+                             Ptr<WifiNetDevice> device,
+                             uint8_t linkId,
+                             EmChannel channel)
+    : m_agentId(agentId), m_band(band), m_device(device), m_linkId(linkId), m_channel(channel) {}
 
 Mac48Address
 EasyMeshRadio::GetBssid() const
 {
-    return m_device->GetMac()->GetAddress();
+    // Same as the device address for a single-link AP; the affiliated AP's
+    // own address for a link of an AP MLD
+    return m_device->GetMac()->GetFrameExchangeManager(m_linkId)->GetAddress();
 }
 
 void
@@ -22,24 +28,58 @@ EasyMeshRadio::StartMonitoring()
     GetPhy()->GetState()->TraceConnectWithoutContext(
         "State", MakeCallback(&EasyMeshRadio::OnPhyState, this));
 
-    // MacRx: frames from associated STAs handed up (uplink);
-    // MacTx: frames from the IP stack queued towards STAs (downlink).
-    m_device->GetMac()->TraceConnectWithoutContext("MacRx",
-                                                   MakeCallback(&EasyMeshRadio::OnMacRx, this));
-    m_device->GetMac()->TraceConnectWithoutContext("MacTx",
-                                                   MakeCallback(&EasyMeshRadio::OnMacTx, this));
+    // The MAC traces (MacRx / MacTx) are per device, i.e. shared by all the
+    // links of an AP MLD, so count data on this link's PHY instead:
+    // received unicast data addressed to this AP (uplink) and first
+    // transmissions of unicast data sent by it (downlink).
+    GetPhy()->TraceConnectWithoutContext("MonitorSnifferRx",
+                                         MakeCallback(&EasyMeshRadio::OnSnifferRx, this));
+    GetPhy()->TraceConnectWithoutContext("MonitorSnifferTx",
+                                         MakeCallback(&EasyMeshRadio::OnSnifferTx, this));
+}
+
+uint32_t
+EasyMeshRadio::DataBytes(Ptr<const Packet> packet, const MpduInfo& aMpdu, WifiMacHeader& hdr)
+{
+    auto copy = packet->Copy();
+    uint32_t mpduSize = copy->GetSize();
+    if (aMpdu.type != NORMAL_MPDU)
+    {
+        AmpduSubframeHeader subframe;
+        copy->RemoveHeader(subframe);
+        mpduSize = subframe.GetLength();
+    }
+    copy->RemoveHeader(hdr);
+    if (!hdr.IsData() || !hdr.HasData() || hdr.GetAddr1().IsGroup())
+    {
+        return 0;
+    }
+    const uint32_t overhead = hdr.GetSerializedSize() + WIFI_MAC_FCS_LENGTH;
+    return mpduSize > overhead ? mpduSize - overhead : 0;
 }
 
 void
-EasyMeshRadio::OnMacRx(Ptr<const Packet> packet)
+EasyMeshRadio::OnSnifferRx(Ptr<const Packet> packet, uint16_t, WifiTxVector, MpduInfo aMpdu,
+                           SignalNoiseDbm, uint16_t)
 {
-    m_ulBytes += packet->GetSize();
+    WifiMacHeader hdr;
+    const uint32_t bytes = DataBytes(packet, aMpdu, hdr);
+    if (bytes && hdr.GetAddr1() == GetBssid())
+    {
+        m_ulBytes += bytes;
+    }
 }
 
 void
-EasyMeshRadio::OnMacTx(Ptr<const Packet> packet)
+EasyMeshRadio::OnSnifferTx(Ptr<const Packet> packet, uint16_t, WifiTxVector, MpduInfo aMpdu,
+                           uint16_t)
 {
-    m_dlBytes += packet->GetSize();
+    WifiMacHeader hdr;
+    const uint32_t bytes = DataBytes(packet, aMpdu, hdr);
+    if (bytes && !hdr.IsRetry() && hdr.GetAddr2() == GetBssid())
+    {
+        m_dlBytes += bytes;
+    }
 }
 
 void

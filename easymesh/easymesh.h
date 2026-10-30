@@ -26,6 +26,8 @@
 
 #include <vector>
 #include <map>
+#include <memory>
+#include <set>
 
 using namespace ns3;
 
@@ -67,10 +69,25 @@ public:
     void EnableLoadBalancing(bool e)   { m_loadBalancing = e; }
     void EnableNetworkOptimization(bool e) { m_netOpt = e; }
     void SetStaMaxSpeed(double v)      { m_staMaxSpeed = v; }
+    // ── Wi-Fi 7 ───────────────────────────────────────────────
+    void EnableBackhaulMlo(bool e)     { m_bhMlo = e; }
+    void EnableFronthaulMlo(bool e)    { m_fhMlo = e; }
+    void SetNumMldClients(uint32_t n)  { m_numMldClients = n; }
+    void EnableEmlsr(bool e)           { m_emlsr = e; }
+    void SetBackhaul6Width(uint16_t w) { m_bh6Width = w; }
 
     double ComputeDistance(Vector a, Vector b) const;
 
 private:
+    // Where a BSS transition goes. For a multi-link STA: the AP MLD address
+    // (what the Assoc trace reports), every affiliated AP it may associate
+    // through, and the channel of each of the STA's links.
+    struct TransitionTarget {
+        Mac48Address            expected;   // address the Assoc trace reports on success
+        std::set<Mac48Address>  bssids;     // BSSIDs the STA is allowed to join through
+        std::vector<EmChannel>  channels;   // one per STA PHY (link)
+    };
+
     // One STA whose BSS membership the simulation manages:
     // a client STA, or the backhaul STA (bSTA) of an Agent.
     struct ManagedSta {
@@ -79,11 +96,11 @@ private:
         Ptr<EasyMeshAssocManager>  assocMgr;
         bool                       isBackhaul = false;
         uint32_t                   ownerId    = 0;   // client id or agent id
+        std::vector<EmBand>        linkBands;       // band of each PHY (link) of the device
 
         // in-flight BSS transition
         bool         pending  = false;
-        Mac48Address target;
-        EmChannel    targetChannel;
+        TransitionTarget target;
         Time         start;
         EventId      hopEvent;
         EventId      timeoutEvent;
@@ -91,11 +108,12 @@ private:
         SteeringEvent ev;
     };
 
-    // Who owns a BSSID
+    // Who owns a BSSID (or an AP MLD address)
     struct BssInfo {
         int32_t agentId;    // -1 = Controller
         bool    backhaul;
-        EmBand  band;
+        EmBand  band;       // AP MLD: band of its first link
+        bool    mld;        // the address is an AP MLD address
     };
 
     // ── Topology builders ─────────────────────────────────────
@@ -112,20 +130,43 @@ private:
     double EdgeWeight(Vector a, Vector b) const;
     Ptr<EasyMeshRadio> SelectInitialRadio(uint32_t clientId) const;
 
+    // ── Wi-Fi device helpers ──────────────────────────────────
+    Ptr<MultiModelSpectrumChannel> SpectrumChannel(EmBand band) const;
+    // one PHY per link: spectrum channel, operating channel, power, CCA
+    // fixedBand=false: every PHY attaches to all the links' bands (EMLSR moves
+    // its main PHY between links)
+    void ConfigureLinks(SpectrumWifiPhyHelper& phy, const std::vector<EmChannel>& links,
+                        bool fixedBand = true) const;
+    // map the device's (MLD) address and the address of each of its links
+    void RegisterBss(Ptr<WifiNetDevice> dev, int32_t agentId, bool backhaul,
+                     const std::vector<EmBand>& linkBands);
+    static std::set<Mac48Address> LinkBssids(Ptr<WifiNetDevice> dev);
+    void InstallClientDevice(uint32_t clientId, NetDeviceContainer& pcapDevices);
+
     // ── Radio estimates (same log-distance model as the channels) ──
-    double EstimateRssi(Vector a, Vector b, EmBand band) const;
+    static double TxPowerDbm(const EmChannel& channel);
+    static double CcaEdThresholdDbm(uint16_t widthMhz);
+    double EstimateRssi(Vector a, Vector b, const EmChannel& channel) const;
     double ClientRssi(uint32_t clientId, Ptr<EasyMeshRadio> radio) const;
     double RadioRssi(Ptr<EasyMeshRadio> a, Ptr<EasyMeshRadio> b) const;
-    static double PhyRateMbps(double rssiDbm, uint16_t widthMhz);
-    static uint32_t RssiToMcs(double rssiDbm, uint16_t widthMhz);
+    static double PhyRateMbps(double rssiDbm, uint16_t widthMhz, uint32_t maxMcs = EHT_MAX_MCS);
+    static uint32_t RssiToMcs(double rssiDbm, uint16_t widthMhz, uint32_t maxMcs = EHT_MAX_MCS);
+    // every link of the backhaul between two positions; MLO capacity = sum (STR)
+    std::vector<EmLinkMetrics> BackhaulLinkMetrics(Vector a, Vector b) const;
+    double BackhaulRate(Vector a, Vector b) const;
     Vector GetAgentPosition(uint32_t agentId) const;
     Vector GetClientPosition(uint32_t clientId) const;
     bool IsAgentOnline(uint32_t agentId) const;
+    Ptr<WifiNetDevice> BackhaulDevice(int32_t parent) const;
     Mac48Address BackhaulBssid(int32_t parent) const;
 
     // ── BSS transitions (steering, roaming, backhaul re-parenting) ──
-    void StartTransition(uint32_t staIdx, Mac48Address bssid, const EmChannel& channel,
-                         const SteeringEvent& ev);
+    TransitionTarget ClientTarget(uint32_t clientId, Ptr<EasyMeshRadio> radio) const;
+    TransitionTarget BackhaulTarget(int32_t parent) const;
+    const EmChannel& ParkingChannel(const ManagedSta& s, size_t link) const;
+    void WakeStaLinks(uint32_t staIdx);
+    void ForgetStaAtAp(uint32_t staIdx);
+    void StartTransition(uint32_t staIdx, TransitionTarget target, const SteeringEvent& ev);
     void HopToTarget(uint32_t staIdx);
     void OnTransitionTimeout(uint32_t staIdx);
     void FinishTransition(uint32_t staIdx, bool success);
@@ -159,6 +200,8 @@ private:
 
     Ptr<MultiModelSpectrumChannel> m_channel24;
     Ptr<MultiModelSpectrumChannel> m_channel5;
+    Ptr<MultiModelSpectrumChannel> m_channel6;
+    std::vector<EmChannel>         m_bhChannels;   // backhaul links: 5 GHz [+ 6 GHz with MLO]
 
     Ptr<WifiNetDevice>              m_ctrlBap;      // Controller backhaul BSS
     std::vector<Ptr<WifiNetDevice>> m_agentBap;     // Agent backhaul BSS (for children)
@@ -205,7 +248,15 @@ private:
     bool     m_loadBalancing = true;
     bool     m_netOpt        = true;
     double   m_staMaxSpeed   = STA_MAX_SPEED;
-    AnimationInterface* m_animation = nullptr;
+    bool     m_bhMlo         = true;
+    bool     m_fhMlo         = true;
+    uint32_t m_numMldClients = NUM_MLD_STA;
+    bool     m_emlsr         = false;
+    uint16_t m_bh6Width      = BH6_WIDTH_MHZ;
+    uint32_t m_partialSetups = 0;   // multi-link setups that left links unused
+    // Created before the Wi-Fi devices exist: NetAnim calls GetChannel() on
+    // every device at start-up, which aborts for a multi-band MLD.
+    std::unique_ptr<AnimationInterface> m_animation;
 
     // ── Static topology ───────────────────────────────────────
     static const Vector CONTROLLER_POS;

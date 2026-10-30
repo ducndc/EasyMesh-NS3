@@ -1,16 +1,19 @@
 # EasyMesh-NS3
 
-A Wi-Fi EasyMesh (Multi-AP) network simulation built on [ns-3](https://www.nsnam.org/). One Controller and a set of dual-band Agents form a multi-hop Wi-Fi backhaul tree and serve mobile clients. The simulation covers client steering, band steering, load balancing, roaming, channel planning, backhaul (network) optimization and Agent failure, all on top of real ns-3 802.11 association, scanning and channel contention.
+A Wi-Fi EasyMesh (Multi-AP) network simulation built on [ns-3](https://www.nsnam.org/). One Controller and a set of tri-band Wi-Fi 7 (802.11be) Agents form a multi-hop, multi-link (MLO) Wi-Fi backhaul tree and serve a mix of Wi-Fi 7 MLD clients and Wi-Fi 6 clients. The simulation covers client steering, band steering, load balancing, roaming, channel planning, backhaul (network) optimization and Agent failure, all on top of real ns-3 802.11 association, scanning and channel contention.
 
 For the design and the algorithm behind each feature, see **[Docs/EasyMesh-Simulation.md](Docs/EasyMesh-Simulation.md)**.
 
 ## Features
 
-- **Tri-band style mesh** — the Controller and every Agent run a backhaul BSS on a dedicated 5 GHz channel (802.11be); each Agent joins its parent through a backhaul STA and serves clients on a 2.4 GHz and a 5 GHz fronthaul BSS (802.11ax, same SSID). Separate spectrum channels per band, so channels and bands really isolate BSSs.
-- **Backhaul topology via MST** — each Agent's uplink is chosen by Prim's Maximum Spanning Tree, with edge weight `throughput` (expected PHY rate) or `rssi`.
+- **Wi-Fi 7 MLO backhaul** — the Controller and every Agent run a backhaul AP MLD with a 5 GHz link (ch159/40 MHz) and a 6 GHz link (80 MHz by default, up to 320 MHz); each Agent's backhaul STA MLD sets up both links with its parent (`--bhMlo=0`: single 5 GHz link).
+- **Tri-band AP MLD fronthaul** — each Agent serves clients through one 802.11be AP MLD with 2.4, 5 and 6 GHz affiliated APs (same SSID); `--fhMlo=0` makes them three single-link APs. Separate spectrum channels per band, so channels and bands really isolate BSSs.
+- **Wi-Fi 7 and Wi-Fi 6 clients** — the first `--mldClients` clients are Wi-Fi 7 MLDs using their 5 and 6 GHz links at once (STR, or EMLSR with `--emlsr`); the rest are single-radio 2.4/5 GHz Wi-Fi 6 clients that join one affiliated AP.
+- **EHT radio model** — MCS 0–13 (4096-QAM), rates scaled by data subcarriers up to 320 MHz, 6 GHz transmit power limited by PSD (LPI 5 dBm/MHz, max 30 dBm).
+- **Backhaul topology via MST** — each Agent's uplink is chosen by Prim's Maximum Spanning Tree, with edge weight `throughput` (expected PHY rate, summed over MLO links) or `rssi`.
 - **Network optimization** — the backhaul tree is re-evaluated periodically and Agents are re-parented when a new tree is more than 10 % better, or immediately when the tree is broken.
 - **Client steering** — the Controller moves clients whose signal drops below a threshold to a better BSS, chosen by expected throughput (link rate, backhaul path capacity and channel load).
-- **Band steering** — clients move from 2.4 GHz to 5 GHz when 5 GHz is strong enough, and back when 5 GHz becomes too weak.
+- **Band steering** — single-link clients move from 2.4 GHz to 5/6 GHz when the higher band is strong enough, and back when it becomes too weak. MLD clients are steered per AP MLD and skip band steering (they use all their bands).
 - **Load balancing** — channel utilization is measured from each radio's PHY state; clients are moved off overloaded radios to clearly less loaded ones.
 - **Roaming** — clients move (RandomWaypoint) and roam on their own when the signal gets weak.
 - **Channel planning** — interference-graph channel assignment per band at start-up, with optional periodic re-planning driven by measured utilization; clients follow their AP to the new channel.
@@ -75,8 +78,14 @@ cd ns-3.48
 ## Run
 
 ```bash
-# Default run: 15 Agents, 8 mobile clients, 30 s, all features on, Agent 1 fails at 12 s
+# Default run: 15 Agents, 8 mobile clients (4 Wi-Fi 7 MLD + 4 Wi-Fi 6), 30 s, all features on, Agent 1 fails at 12 s
 ./ns3 run easymesh_sim
+
+# Wi-Fi 7 baseline: single-link backhaul and fronthaul (compare with the MLO default)
+./ns3 run "easymesh_sim --bhMlo=0 --fhMlo=0"
+
+# 320 MHz 6 GHz backhaul link, all clients Wi-Fi 7 MLD
+./ns3 run "easymesh_sim --bhWidth6=320 --mldClients=8"
 
 # RSSI-maximizing backhaul MST instead of throughput
 ./ns3 run "easymesh_sim --mstMetric=rssi"
@@ -114,6 +123,11 @@ Comparing runs that differ in one flag (e.g. `--channelPlan=none` vs `dynamic`, 
 | `--loadBalancing` | bool   | `true`         | Controller load balancing                                          |
 | `--netOpt`        | bool   | `true`         | Periodic backhaul optimization (failure recovery always runs)      |
 | `--staSpeed`      | double | `2.0`          | Maximum client speed in m/s (`0` = static clients)                  |
+| `--bhMlo`         | bool   | `true`         | MLO backhaul: 5 GHz + 6 GHz links (`false`: 5 GHz only)            |
+| `--bhWidth6`      | uint32 | `80`           | 6 GHz backhaul link width: `20` \| `40` \| `80` \| `160` \| `320` MHz |
+| `--fhMlo`         | bool   | `true`         | Tri-band AP MLD fronthaul and MLO for Wi-Fi 7 clients              |
+| `--mldClients`    | uint32 | `4`            | Number of Wi-Fi 7 clients (the others are Wi-Fi 6)                 |
+| `--emlsr`         | bool   | `false`        | Experimental: MLD clients use EMLSR instead of STR (see limitations) |
 | `--pcap`          | bool   | `false`        | Enable PCAP capture                                                |
 
 Thresholds, intervals, channel sets, traffic rates and placement bounds are in `easymesh/parameters.h`.
@@ -126,7 +140,7 @@ Each run prints, in order:
 2. **Channel plan** — initial and final channel, number of switches and mean utilization per radio, plus total co-channel interference before and after.
 3. **Transition log** — every steering, band-steering, load-balancing, roaming, channel-switch, Agent-failure and backhaul re-parenting event with time, from → to, reason, RSSI before/after, latency and outcome; followed by a per-reason summary (count, successes, mean latency).
 4. **Per-flow traffic table** — Tx/Rx packets, throughput, delay, jitter, PDR and quality rating for every monitored flow.
-5. **Per-radio traffic summary** — uplink/downlink throughput and mean channel utilization per fronthaul radio.
+5. **Per-radio traffic summary** — uplink/downlink throughput and mean channel utilization per fronthaul radio (per affiliated AP of an AP MLD, so the split of MLD traffic across links is visible), followed by a Wi-Fi 7 configuration line.
 6. **Network-wide summary** — total flows, packets, aggregate throughput, mean delay and mean PDR.
 
 A NetAnim trace `easymesh-sim-animation-run<N>.xml` is written to the working directory.
@@ -134,8 +148,9 @@ A NetAnim trace `easymesh-sim-animation-run<N>.xml` is written to the working di
 ## Known Limitations
 
 - **ns-3.48 CCA bug workaround** — ns-3.48 can reset CCA to idle while a frame is still being received when a neighbouring channel is busy, which triggers an assertion. The simulation lowers the CCA energy-detect threshold to −88 dBm (`CCA_ED_THRESHOLD_DBM`) to avoid it; radios therefore defer slightly more often to weak energy.
-- **Simulation speed** — 5 GHz fronthaul and backhaul use 40 MHz channels; 80 MHz roughly halves simulation speed.
+- **Simulation speed** — 5 GHz fronthaul and backhaul use 40 MHz channels and 6 GHz uses 80 MHz. ns-3 tracks receive power per RU, so wide channels are slow: a 320 MHz backhaul link (`--bhWidth6=320`) is about 4× slower to simulate than 80 MHz.
 - **Control plane** — IEEE 1905 messages, 802.11v/k frames and channel switch announcements are not sent over the air; their effect is modelled directly.
+- **EMLSR is experimental** — the BSS transition mechanism retunes STA PHYs directly, which conflicts with the EMLSR manager moving its main PHY between links; ns-3 aborts (`DefaultEmlsrManager`: main PHY in TX) after the first transition of an EMLSR client. STR clients are not affected.
 - **Debug logging** — enabling `NS_LOG` for the ns-3 Wi-Fi PHY components aborts in ns-3.48 (also in stock examples).
 
 ## License

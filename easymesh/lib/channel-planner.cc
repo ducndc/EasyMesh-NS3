@@ -5,13 +5,22 @@
 #include <limits>
 #include <numeric>
 
-ChannelPlanner::ChannelPlanner(std::vector<uint16_t> channels24, std::vector<uint16_t> channels5)
-    : m_channels24(std::move(channels24)), m_channels5(std::move(channels5)) {}
+ChannelPlanner::ChannelPlanner(std::vector<uint16_t> channels24,
+                               std::vector<uint16_t> channels5,
+                               std::vector<uint16_t> channels6)
+    : m_channels24(std::move(channels24)),
+      m_channels5(std::move(channels5)),
+      m_channels6(std::move(channels6)) {}
 
 const std::vector<uint16_t>&
 ChannelPlanner::ChannelsFor(EmBand band) const
 {
-    return (band == EmBand::BAND_2_4GHZ) ? m_channels24 : m_channels5;
+    switch (band)
+    {
+    case EmBand::BAND_2_4GHZ: return m_channels24;
+    case EmBand::BAND_6GHZ:   return m_channels6;
+    default:                  return m_channels5;
+    }
 }
 
 ChannelPlanner::Matrix

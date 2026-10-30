@@ -49,18 +49,42 @@
 // NS_ASSERT(!m_currentEvent) in PhyEntity::StartReceivePreamble. Preamble
 // detection triggers at -82 dBm over the whole PPDU width, while CCA-ED looks
 // at the primary 20 MHz only (-3 dB for a 40 MHz PPDU), so the threshold sits
-// below -85 dBm to keep CCA busy for any PPDU in reception.
+// below -85 dBm to keep CCA busy for any PPDU in reception. This value is for
+// PHYs up to 40 MHz; wider PHYs lower it by 3 dB per doubling (-91 dBm at 80,
+// -97 dBm at 320 MHz), see EasyMeshSimulation::CcaEdThresholdDbm.
 #define CCA_ED_THRESHOLD_DBM    -88.0
 // Log-distance path loss (exponent 3) at 1 m reference per band
 #define PATHLOSS_EXPONENT       3.0
 #define REF_LOSS_2_4GHZ_DB      40.05   // 2.437 GHz
 #define REF_LOSS_5GHZ_DB        46.68   // 5.15 GHz
+#define REF_LOSS_6GHZ_DB        48.17   // 6.105 GHz
+
+// ── Wi-Fi 7 (802.11be) ───────────────────────────────────────
+// 6 GHz transmit power is PSD-limited (Low Power Indoor): 5 dBm/MHz,
+// capped at 30 dBm EIRP, so wider channels transmit more total power.
+// Applied to every 6 GHz AP / bSTA / MLD link (single-radio clients keep
+// TX_POWER_DBM on all bands).
+#define TX_PSD_6GHZ_DBM_PER_MHZ 5.0
+#define TX_POWER_6GHZ_MAX_DBM   30.0
+// MLO backhaul: link 0 on the 5 GHz backhaul channel above, link 1 on a
+// 6 GHz channel inside 20 MHz channels 1..61 (below the 6 GHz fronthaul set).
+// The channel number follows the width: 20→1, 40→3, 80→7, 160→15, 320→31.
+// 320 MHz works (--bhWidth6=320) but is ~4x slower to simulate than 80 MHz:
+// SpectrumWifiPhy tracks the received power of every RU of the channel.
+#define BH6_WIDTH_MHZ           80
+#define PARKING6_CHANNEL_NUMBER 233     // idle 6 GHz channel for re-scans of 6 GHz links
+#define EHT_MAX_MCS             13      // 4096-QAM; HE (Wi-Fi 6) stops at MCS 11
+#define HE_MAX_MCS              11
+// Clients [0, NUM_MLD_STA) are Wi-Fi 7 (5 + 6 GHz MLD), the rest Wi-Fi 6 (2.4 / 5 GHz)
+#define NUM_MLD_STA             4
 
 // ── Channel planning ─────────────────────────────────────────
 #define FH24_CHANNELS           {1, 6, 11}
 #define FH24_WIDTH_MHZ          20
 #define FH5_CHANNELS            {38, 46, 54, 62, 102, 110, 118, 126, 134, 142}
 #define FH5_WIDTH_MHZ           40      // 80 MHz is ~2x slower to simulate (per-RU band tracking)
+#define FH6_CHANNELS            {71, 87, 103, 119, 135, 151, 167, 183, 199, 215}
+#define FH6_WIDTH_MHZ           80
 #define INTERFERENCE_FLOOR_DBM  -85.0   // below this, two APs are not neighbours
 #define CHANNEL_PLAN_INTERVAL   10.0    // s – dynamic re-planning period
 #define CHANNEL_SWITCH_MIN_GAIN 0.30    // a radio moves only if its cost drops > 30 %

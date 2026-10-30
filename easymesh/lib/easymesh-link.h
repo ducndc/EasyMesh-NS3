@@ -1,12 +1,24 @@
 #ifndef EASYMESH_LINK_H
 #define EASYMESH_LINK_H
 
+#include "easymesh-types.h"
+
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
+
+#include <vector>
 
 using namespace ns3;
 
 enum class LinkType { FRONTHAUL, BACKHAUL, ETHERNET_BACKHAUL };
+
+// One affiliated link of a (possibly multi-link) Wi-Fi backhaul connection
+struct EmLinkMetrics {
+    EmChannel channel;
+    double    rssi     = -100.0;
+    uint32_t  mcs      = 0;
+    double    rateMbps = 0.0;
+};
 
 class EasyMeshLink : public SimpleRefCount<EasyMeshLink> {
 public:
@@ -15,6 +27,9 @@ public:
 
     void UpdateMetrics(double rssi, double snr, uint32_t mcs,
                        double throughputMbps, double airtime);
+    // MLO: per-link metrics; throughput becomes the sum over the links (STR)
+    void SetAffiliatedLinks(std::vector<EmLinkMetrics> links);
+    const std::vector<EmLinkMetrics>& GetAffiliatedLinks() const { return m_links; }
     void PrintStatus() const;
     void SetEndpoints(Ptr<Node> src, Ptr<Node> dst);
 
@@ -51,6 +66,7 @@ private:
     bool      m_active    = true;
     uint64_t  m_rxBytes   = 0;
     uint64_t  m_txBytes   = 0;
+    std::vector<EmLinkMetrics> m_links;
 };
 
 #endif // EASYMESH_LINK_H

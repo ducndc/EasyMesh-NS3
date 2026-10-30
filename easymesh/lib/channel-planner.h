@@ -38,7 +38,9 @@ class ChannelPlanner
     // dB above the interference floor between two radios (>= 0)
     using InterferenceFn = std::function<double(uint32_t keyA, uint32_t keyB)>;
 
-    ChannelPlanner(std::vector<uint16_t> channels24, std::vector<uint16_t> channels5);
+    ChannelPlanner(std::vector<uint16_t> channels24,
+                   std::vector<uint16_t> channels5,
+                   std::vector<uint16_t> channels6);
 
     std::map<uint32_t, uint16_t> Plan(const std::vector<Radio>& radios,
                                       const InterferenceFn& interference) const;
@@ -72,6 +74,7 @@ class ChannelPlanner
 
     std::vector<uint16_t> m_channels24;
     std::vector<uint16_t> m_channels5;
+    std::vector<uint16_t> m_channels6;
 };
 
 #endif // CHANNEL_PLANNER_H

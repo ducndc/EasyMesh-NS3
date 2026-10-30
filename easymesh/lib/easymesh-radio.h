@@ -12,15 +12,21 @@
 using namespace ns3;
 
 // ────────────────────────────────────────────────────────────────
-// EasyMeshRadio – one fronthaul BSS (AP radio) of an Agent.
-// Measures channel utilization from the PHY state machine (time not
-// IDLE / SLEEP / OFF) and UL/DL bytes from the MAC, like the AP
-// Metrics an EasyMesh Agent reports to the Controller.
+// EasyMeshRadio – one fronthaul BSS (AP radio) of an Agent: either a
+// single-link AP device, or one affiliated AP (link) of a Wi-Fi 7 AP MLD,
+// in which case several radios share the same device (and IP interface).
+// Measures channel utilization from the link's PHY state machine (time
+// not IDLE / SLEEP / OFF) and UL/DL data bytes from the link's PHY
+// sniffer, like the AP Metrics an EasyMesh Agent reports to the Controller.
 // ────────────────────────────────────────────────────────────────
 class EasyMeshRadio : public SimpleRefCount<EasyMeshRadio>
 {
   public:
-    EasyMeshRadio(uint32_t agentId, EmBand band, Ptr<WifiNetDevice> device, EmChannel channel);
+    EasyMeshRadio(uint32_t agentId,
+                  EmBand band,
+                  Ptr<WifiNetDevice> device,
+                  uint8_t linkId,
+                  EmChannel channel);
 
     void StartMonitoring();
     void SampleUtilization();       // closes the current measurement window
@@ -28,8 +34,11 @@ class EasyMeshRadio : public SimpleRefCount<EasyMeshRadio>
     uint32_t           GetAgentId()  const { return m_agentId; }
     EmBand             GetBand()     const { return m_band; }
     Ptr<WifiNetDevice> GetDevice()   const { return m_device; }
-    Ptr<WifiPhy>       GetPhy()      const { return m_device->GetPhy(); }
-    Mac48Address       GetBssid()    const;
+    uint8_t            GetLinkId()   const { return m_linkId; }
+    bool               IsMldLink()   const { return m_device->GetNPhys() > 1; }
+    Ptr<WifiPhy>       GetPhy()      const { return m_device->GetPhy(m_linkId); }
+    Mac48Address       GetBssid()    const;   // address of this (affiliated) AP
+    Mac48Address       GetMldAddress() const { return m_device->GetMac()->GetAddress(); }
     const EmChannel&   GetChannel()  const { return m_channel; }
     // retunes the AP PHY; countSwitch=false for the initial plan
     void               SetChannel(const EmChannel& ch, bool countSwitch = true);
@@ -51,12 +60,17 @@ class EasyMeshRadio : public SimpleRefCount<EasyMeshRadio>
 
   private:
     void OnPhyState(Time start, Time duration, WifiPhyState state);
-    void OnMacRx(Ptr<const Packet> packet);
-    void OnMacTx(Ptr<const Packet> packet);
+    void OnSnifferRx(Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector txVector,
+                     MpduInfo aMpdu, SignalNoiseDbm signalNoise, uint16_t staId);
+    void OnSnifferTx(Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector txVector,
+                     MpduInfo aMpdu, uint16_t staId);
+    // payload bytes of a unicast data MPDU (A-MPDU subframe or not), 0 otherwise
+    static uint32_t DataBytes(Ptr<const Packet> packet, const MpduInfo& aMpdu, WifiMacHeader& hdr);
 
     uint32_t           m_agentId;
     EmBand             m_band;
     Ptr<WifiNetDevice> m_device;
+    uint8_t            m_linkId;
     EmChannel          m_channel;
     Ipv4Address        m_ip;
     uint32_t           m_ifIndex = 0;

@@ -21,6 +21,12 @@ EasyMeshLink::UpdateMetrics(double rssi, double snr, uint32_t mcs, double throug
 }
 
 void
+EasyMeshLink::SetAffiliatedLinks(std::vector<EmLinkMetrics> links)
+{
+    m_links = std::move(links);
+}
+
+void
 EasyMeshLink::SetEndpoints(Ptr<Node> src, Ptr<Node> dst)
 {
     m_src = src;
